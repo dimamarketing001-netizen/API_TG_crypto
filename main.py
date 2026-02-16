@@ -161,7 +161,8 @@ async def handle_transaction(data: TransactionData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 2. РАСЧЕТ ПО СДЕЛКЕ (Тип 2)@app.post("/transaction-calculation")
+# 2. РАСЧЕТ ПО СДЕЛКЕ (Тип 2)
+@app.post("/transaction-calculation")
 async def handle_calculation(data: CalculationData):
     try:
         # Собираем красивое сообщение
