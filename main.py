@@ -151,7 +151,6 @@ async def handle_transaction(data: TransactionData):
             "status": "success",
             "group_id": group_id,
             "topic_id": new_topic.message_thread_id,
-            "city": city_name
         }
 
     except Exception as e:
