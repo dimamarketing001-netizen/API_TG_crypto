@@ -58,10 +58,15 @@ class TransactionData(BaseModel):
 class CalculationData(BaseModel):
     chat_id: int
     message_thread_id: int
-    exchange_rate: Optional[str] = "Не указан"
-    profit: Optional[str] = "0"
-    net_amount: Optional[str] = "0"
-    comment: Optional[str] = ""
+    transaction_type: str        
+    calculation_type: str        
+    operator_rate: str 
+    total_percentage: str 
+    client_rate: str
+    fee: str                    
+    formula: str                 
+    total_to_transfer: str       
+    test_info: Optional[str] = "Без теста"
 
 # 3 тип: Обновление статуса или доп. инфо
 class StatusUpdateData(BaseModel):
@@ -156,16 +161,21 @@ async def handle_transaction(data: TransactionData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 2. РАСЧЕТ ПО СДЕЛКЕ (Тип 2)
-@app.post("/transaction-calculation")
+# 2. РАСЧЕТ ПО СДЕЛКЕ (Тип 2)@app.post("/transaction-calculation")
 async def handle_calculation(data: CalculationData):
     try:
+        # Собираем красивое сообщение
         message_text = (
-            f"📊 <b>Расчет по сделке</b>\n\n"
-            f"📈 <b>Курс:</b> {data.exchange_rate}\n"
-            f"💵 <b>Чистыми:</b> {data.net_amount}\n"
-            f"💎 <b>Профит:</b> {data.profit}\n"
-            f"💬 <b>Комментарий:</b> {data.comment if data.comment else '-'}"
+            f"📊 <b>РАСЧЕТ СДЕЛКИ</b>\n\n"
+            f"🔄 <b>Тип сделки:</b> {data.transaction_type}\n"
+            f"📐 <b>Тип просчета:</b> {data.calculation_type}\n"
+            f"📈 <b>Курс оператора:</b> {data.operator_rate}\n"
+            f"📊 <b>Общий процент:</b> {data.total_percentage}\n"
+            f"👤 <b>Курс для клиента:</b> {data.client_rate}\n"
+            f"💸 <b>Комиссия за сделку:</b> {data.fee}\n\n"
+            f"📝 <b>Формула:</b>\n<code>{data.formula}</code>\n\n"
+            f"✅ <b>Итог к переводу:</b> <b>{data.total_to_transfer}</b>\n"
+            f"🧪 <b>Тест:</b> {data.test_info}"
         )
         
         await bot.send_message(
@@ -176,7 +186,7 @@ async def handle_calculation(data: CalculationData):
         )
         return {"status": "success"}
     except Exception as e:
-        print(f"Ошибка отправки расчета: {e}")
+        print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
