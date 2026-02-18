@@ -43,17 +43,17 @@ CITIES_TO_GROUPS = {
 
 # 1 тип: Создание транзакции
 class TransactionData(BaseModel):
-    city_id: int
+    city_id: Union[int, str]  # Разрешаем и число, и строку
     brand_id: Optional[Union[int, str]] = None
-    creator_id: int
+    creator_id: Union[int, str]
     visit_time: str
     transaction_type: str
     client_full_name: str
-    cash_amount: Union[float, int, str]
+    cash_amount: Union[float, int, str] # Очень гибко
     cash_currency: str
     wallet_address: str
     wallet_network: str
-    wallet_amount: Any 
+    wallet_amount: Any
     wallet_currency: str
     wallet_owner_type: str
     form_url: str
@@ -131,7 +131,7 @@ async def get_external_data():
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    print(f"ОШИБКА ВАЛИДАЦИИ: {exc.errors()}") # Это покажет, какое поле не подошло
+    print(f"VALIDATION ERROR: {exc.errors()}") 
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors(), "body": exc.body},
