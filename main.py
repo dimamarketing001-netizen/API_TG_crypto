@@ -47,10 +47,12 @@ class TransactionData(BaseModel):
     visit_time: str
     transaction_type: str
     client_full_name: str
-    amount: float
-    currency: str
+    cash_amount: float
+    cash_currency: str
     wallet_address: str
-    network: str
+    wallet_network: str
+    wallet_amount: str
+    wallet_currency: str
     wallet_owner_type: str
     form_url: str
 
