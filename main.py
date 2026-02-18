@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from aiogram import Bot
 from aiogram.types import ForumTopic
-from typing import Optional
+from typing import Optional, Union, Any
 
 # --- КОНФИГУРАЦИЯ ---
 BOT_TOKEN = "8229314742:AAHM35Yx6_t8C6qfIvALcckdO9hFqQOKpBw"
@@ -51,7 +51,7 @@ class TransactionData(BaseModel):
     cash_currency: str
     wallet_address: str
     wallet_network: str
-    wallet_amount: str
+    wallet_amount: Any
     wallet_currency: str
     wallet_owner_type: str
     form_url: str
