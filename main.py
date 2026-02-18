@@ -155,15 +155,17 @@ async def handle_transaction(data: TransactionData):
     try:
         if data.transaction_type == "direct":
             type_text = "<b>ПРЯМАЯ</b>"
+            amount = f"{data.cash_amount} {data.cash_currency}"
         else:
             data.transaction_type
 
         if data.transaction_type == "reverse":
             type_text = "<b>ОБРАТНАЯ</b>"
+            amount = f"{data.wallet_amount} {data.wallet_currency}"
         else:
             data.transaction_type
 
-        topic_title = f"{type_text} | {data.amount} {data.currency} | {data.visit_time}"
+        topic_title = f"{type_text} | {amount} | {data.visit_time}"
         new_topic: ForumTopic = await bot.create_forum_topic(chat_id=group_id, name=topic_title)
         
         await bot.send_message(
