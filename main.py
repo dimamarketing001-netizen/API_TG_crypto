@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from aiogram import Bot
 from aiogram.types import ForumTopic
 from typing import Optional, Union, Any
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 # --- КОНФИГУРАЦИЯ ---
 BOT_TOKEN = "8229314742:AAHM35Yx6_t8C6qfIvALcckdO9hFqQOKpBw"
@@ -42,19 +44,22 @@ CITIES_TO_GROUPS = {
 # 1 тип: Создание транзакции
 class TransactionData(BaseModel):
     city_id: int
-    brand_id: Optional[int] = None
+    brand_id: Optional[Union[int, str]] = None
     creator_id: int
     visit_time: str
     transaction_type: str
     client_full_name: str
-    cash_amount: float
+    cash_amount: Union[float, int, str]
     cash_currency: str
     wallet_address: str
     wallet_network: str
-    wallet_amount: Any
+    wallet_amount: Any 
     wallet_currency: str
     wallet_owner_type: str
     form_url: str
+
+    class Config:
+        extra = "allow"
 
 # 2 тип: Расчет по сделке
 class CalculationData(BaseModel):
@@ -124,10 +129,18 @@ async def get_external_data():
 
 # --- ЭНДПОИНТЫ ---
 
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    print(f"ОШИБКА ВАЛИДАЦИИ: {exc.errors()}") # Это покажет, какое поле не подошло
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
+
 # 1. СОЗДАНИЕ ЗАЯВКИ (Тип 1)
 @app.post("/new-transaction")
 async def handle_transaction(request_data: TransactionWrapper):
-    data = request_data.payload  # Работаем с данными внутри payload
+    data = request_data.payload
     
     api_values = await get_external_data()
     if not api_values:
