@@ -81,19 +81,30 @@ bot = Bot(token=BOT_TOKEN)
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 
 def format_main_message(data: TransactionData, city_name: str, partner_name: str) -> str:
-    type_text = "<b>ПРЯМАЯ</b>" if data.transaction_type == "direct" else \
-                "<b>ОБРАТНАЯ</b>" if data.transaction_type == "reverse" else data.transaction_type
     wallet_owner_type_text = "Клиентский" if data.wallet_owner_type == "client" else \
                              "Партнёрский" if data.wallet_owner_type == "partner" else data.wallet_owner_type
+    
+    if data.transaction_type == "direct":
+        type_text = "<b>ПРЯМАЯ</b>"
+        amount = f"{data.cash_amount} {data.cash_currency}"
+    else:
+        data.transaction_type
+
+    if data.transaction_type == "reverse":
+        type_text = "<b>ОБРАТНАЯ</b>"
+        amount = f"{data.wallet_amount} {data.wallet_currency}"
+    else:
+        data.transaction_type
+
 
     return (
         f"🔄 <b>Тип сделки:</b> {type_text}\n"
         f"🏛 <b>Город:</b> {city_name}\n"
         f"🤝 <b>Чья сделка:</b> {partner_name}\n\n"
         f"👤 <b>Клиент:</b> {data.client_full_name}\n"
-        f"💰 <b>Сумма:</b> {data.amount} {data.currency}\n\n"
+        f"💰 <b>Сумма:</b> {amount}\n\n"
         f"🏦 <b>Кошелек:</b> <code>{data.wallet_address}</code>\n"
-        f"🌐 <b>Сеть:</b> {data.network}\n"
+        f"🌐 <b>Сеть:</b> {data.wallet_network}\n"
         f"💰 <b>Тип кошелька:</b> {wallet_owner_type_text}\n\n"
         f"🕒 <b>Дата и время:</b> {data.visit_time}\n\n"
         f"🔗 <a href='{data.form_url}'>Ссылка на форму</a>"
@@ -165,11 +176,16 @@ async def handle_transaction(data: TransactionData):
 @app.post("/transaction-calculation")
 async def handle_calculation(data: CalculationData):
     try:
-        # Собираем красивое сообщение
+        transaction_type = "<b>ПРЯМАЯ</b>" if data.transaction_type == "direct" else \
+                    "<b>ОБРАТНАЯ</b>" if data.transaction_type == "reverse" else data.transaction_type
+
+        calculation_type = "<b>ПРЯМОЙ</b>" if data.calculation_type == "direct" else \
+                    "<b>ОБРАТНЫЙ</b>" if data.calculation_type == "reverse" else data.calculation_type
+
         message_text = (
             f"📊 <b>РАСЧЕТ СДЕЛКИ</b>\n\n"
-            f"🔄 <b>Тип сделки:</b> {data.transaction_type}\n"
-            f"📐 <b>Тип просчета:</b> {data.calculation_type}\n"
+            f"🔄 <b>Тип сделки:</b> {transaction_type}\n"
+            f"📐 <b>Тип просчета:</b> {calculation_type}\n"
             f"📈 <b>Курс оператора:</b> {data.operator_rate}\n"
             f"📊 <b>Общий процент:</b> {data.total_percentage}\n"
             f"👤 <b>Курс для клиента:</b> {data.client_rate}\n"
@@ -192,13 +208,11 @@ async def handle_calculation(data: CalculationData):
 
 
 # 3. ИЗМЕНЕНИЕ СТАТУСА (Тип 3)
-@app.post("/transaction-status")
+@app.post("/transaction-message")
 async def handle_status_update(data: StatusUpdateData):
     try:
         message_text = (
-            f"🔔 <b>Обновление статуса</b>\n\n"
-            f"📝 <b>Статус:</b> {data.status_text}\n"
-            f"👤 <b>Изменил:</b> {data.operator_name}"
+            f"📝 {data.text}\n"
         )
         
         await bot.send_message(
