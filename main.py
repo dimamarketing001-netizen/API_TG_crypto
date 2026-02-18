@@ -74,7 +74,7 @@ class CalculationData(BaseModel):
 class StatusUpdateData(BaseModel):
     chat_id: int
     message_thread_id: int
-    status_text: str
+    text: str
     operator_name: Optional[str] = "Система"
 
 app = FastAPI()
