@@ -77,30 +77,30 @@ class StatusUpdateData(BaseModel):
     text: str
     operator_name: Optional[str] = "Система"
 
+class TransactionWrapper(BaseModel):
+    method: str
+    payload: TransactionData
+
 app = FastAPI()
 bot = Bot(token=BOT_TOKEN)
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
+def get_transaction_info(data: TransactionData):
+    """Универсальная функция для определения текста типа и суммы"""
+    if data.transaction_type == "direct":
+        return "ПРЯМАЯ", f"{data.cash_amount} {data.cash_currency}"
+    elif data.transaction_type == "reverse":
+        return "ОБРАТНАЯ", f"{data.wallet_amount} {data.wallet_currency}"
+    return data.transaction_type.upper(), "0"
 
 def format_main_message(data: TransactionData, city_name: str, partner_name: str) -> str:
     wallet_owner_type_text = "Клиентский" if data.wallet_owner_type == "client" else \
                              "Партнёрский" if data.wallet_owner_type == "partner" else data.wallet_owner_type
     
-    if data.transaction_type == "direct":
-        type_text = "<b>ПРЯМАЯ</b>"
-        amount = f"{data.cash_amount} {data.cash_currency}"
-    else:
-        data.transaction_type
-
-    if data.transaction_type == "reverse":
-        type_text = "<b>ОБРАТНАЯ</b>"
-        amount = f"{data.wallet_amount} {data.wallet_currency}"
-    else:
-        data.transaction_type
-
+    type_text, amount = get_transaction_info(data)
 
     return (
-        f"🔄 <b>Тип сделки:</b> {type_text}\n"
+        f"🔄 <b>Тип сделки:</b> <b>{type_text}</b>\n"
         f"🏛 <b>Город:</b> {city_name}\n"
         f"🤝 <b>Чья сделка:</b> {partner_name}\n\n"
         f"👤 <b>Клиент:</b> {data.client_full_name}\n"
@@ -126,49 +126,36 @@ async def get_external_data():
 
 # 1. СОЗДАНИЕ ЗАЯВКИ (Тип 1)
 @app.post("/new-transaction")
-async def handle_transaction(data: TransactionData):
-    print('data', data)
+async def handle_transaction(request_data: TransactionWrapper):
+    data = request_data.payload  # Работаем с данными внутри payload
+    
     api_values = await get_external_data()
     if not api_values:
-        raise HTTPException(status_code=500, detail="Ошибка API")
+        raise HTTPException(status_code=500, detail="Ошибка внешнего API")
 
     # Поиск города
     departments = api_values.get("DEPARTMENTS", [])
-    city_name = "Неизвестный город"
-    for d in departments:
-        if str(d.get("ID")) == str(data.city_id):
-            city_name = d.get("NAME")
-            break
+    city_name = next((d.get("NAME") for d in departments if str(d.get("ID")) == str(data.city_id)), "Неизвестный город")
 
     # Поиск партнера
     partners_list = api_values.get("PARTNERS", [])
     partner_name = "Неизвестный партнер"
     if data.brand_id is not None:
-        for p in partners_list:
-            if str(p.get("ID")) == str(data.brand_id):
-                partner_name = p.get("NAME", "Имя не указано")
-                break
+        partner_name = next((p.get("NAME") for p in partners_list if str(p.get("ID")) == str(data.brand_id)), "Неизвестный партнер")
 
     group_id = CITIES_TO_GROUPS.get(city_name)
-    if not group_id:
-        raise HTTPException(status_code=404, detail=f"Группа для {city_name} не найдена")
+    if not group_id or group_id == 0:
+        raise HTTPException(status_code=404, detail=f"Группа для города {city_name} не настроена")
 
     try:
-        if data.transaction_type == "direct":
-            type_text = "<b>ПРЯМАЯ</b>"
-            amount = f"{data.cash_amount} {data.cash_currency}"
-        else:
-            data.transaction_type
-
-        if data.transaction_type == "reverse":
-            type_text = "<b>ОБРАТНАЯ</b>"
-            amount = f"{data.wallet_amount} {data.wallet_currency}"
-        else:
-            data.transaction_type
-
+        # Получаем данные для заголовка темы
+        type_text, amount = get_transaction_info(data)
         topic_title = f"{type_text} | {amount} | {data.visit_time}"
+        
+        # Создание топика
         new_topic: ForumTopic = await bot.create_forum_topic(chat_id=group_id, name=topic_title)
         
+        # Отправка сообщения
         await bot.send_message(
             chat_id=group_id,
             message_thread_id=new_topic.message_thread_id,
@@ -177,7 +164,6 @@ async def handle_transaction(data: TransactionData):
             disable_web_page_preview=True
         )
 
-        # Возвращаем ID группы и темы, чтобы другие скрипты могли их использовать
         return {
             "status": "success",
             "group_id": group_id,
@@ -185,6 +171,7 @@ async def handle_transaction(data: TransactionData):
         }
 
     except Exception as e:
+        print(f"Ошибка Bot API: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # 2. РАСЧЕТ ПО СДЕЛКЕ (Тип 2)
