@@ -155,7 +155,12 @@ async def handle_transaction(data: TransactionData):
             parse_mode="HTML",
             disable_web_page_preview=True
         )
-        return {"status": "success", "topic_id": new_topic.message_thread_id}
+        
+        return {
+            "status": "success",
+            "group_id": group_id,
+            "topic_id": new_topic.message_thread_id,
+        }
     except Exception as e:
         print(f"Bot error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
