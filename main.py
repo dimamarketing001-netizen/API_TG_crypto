@@ -151,7 +151,17 @@ async def handle_transaction(data: TransactionData):
         raise HTTPException(status_code=404, detail=f"Группа для {city_name} не найдена")
 
     try:
-        topic_title = f"{data.client_full_name} | {data.amount} {data.currency}"
+        if data.transaction_type == "direct":
+            type_text = "<b>ПРЯМАЯ</b>"
+        else:
+            data.transaction_type
+
+        if data.transaction_type == "reverse":
+            type_text = "<b>ОБРАТНАЯ</b>"
+        else:
+            data.transaction_type
+
+        topic_title = f"{type_text} | {data.amount} {data.currency} | {data.visit_time}"
         new_topic: ForumTopic = await bot.create_forum_topic(chat_id=group_id, name=topic_title)
         
         await bot.send_message(
