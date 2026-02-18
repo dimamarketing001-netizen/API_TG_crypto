@@ -127,6 +127,7 @@ async def get_external_data():
 # 1. СОЗДАНИЕ ЗАЯВКИ (Тип 1)
 @app.post("/new-transaction")
 async def handle_transaction(data: TransactionData):
+    print('data', data)
     api_values = await get_external_data()
     if not api_values:
         raise HTTPException(status_code=500, detail="Ошибка API")
