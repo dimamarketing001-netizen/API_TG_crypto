@@ -1,12 +1,10 @@
 import uvicorn
 import httpx
-import sys
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from aiogram import Bot
-from aiogram.types import ForumTopic
+from aiogram.types import BufferedInputFile
 from typing import Optional, Union, Any
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 # --- КОНФИГУРАЦИЯ ---
@@ -25,12 +23,30 @@ CITIES_TO_GROUPS = {
     "Ярославль": -1003721184896
 }
 
+STATUS_MAP = {
+    "calc_new": "🆕 Новый расчет",
+    "calc_requested": "📩 Запросили расчет",
+    "calc_issued": "📤 Выдали расчет",
+    "calc_accepted": "🤝 Клиент согласился с расчетом",
+    "deal_processing": "⏳ Сделка в процессе",
+    "deal_data_verification": "🔍 Идет проверка данных",
+    "deal_data_verified": "✅ Данные проверены",
+    "deal_dkp_uploading": "📑 Загрузка подписанного ДКП",
+    "deal_verified": "🆗 Проверено",
+    "deal_dkp_verification": "🧐 Проверка подписанного ДКП",
+    "deal_signatures_verified": "🖋 Наличие подписей в ДКП проверено",
+    "deal_success": "🎉 Успех",
+    "deal_failed": "❌ Провал"
+}
+
+app = FastAPI()
+bot = Bot(token=BOT_TOKEN)
+
 # --- МОДЕЛИ ДАННЫХ ---
 
-class TransactionData(BaseModel):
+class TransactionCreate(BaseModel):
     city_id: Union[int, str]
     brand_id: Optional[Union[int, str]] = None
-    creator_id: Optional[Union[int, str]] = None
     visit_time: Optional[str] = ""
     transaction_type: Optional[str] = "direct"
     client_full_name: Optional[str] = "Не указано"
@@ -38,17 +54,17 @@ class TransactionData(BaseModel):
     cash_currency: Optional[str] = ""
     wallet_address: Optional[str] = ""
     wallet_network: Optional[str] = ""
-    wallet_amount: Any = 0
-    wallet_currency: Optional[str] = ""
     wallet_owner_type: Optional[str] = ""
     form_url: Optional[str] = ""
+    individual_conditions: int = 0 
 
-    class Config:
-        extra = "allow"
+class StatusUpdate(BaseModel):
+    chat_id: Union[int, str]
+    message_thread_id: Union[int, str]
+    status: str 
+    link: Optional[str] = None 
 
-# --- ВОТ ЭТИ МОДЕЛИ НУЖНО БЫЛО ВЕРНУТЬ ---
-
-class CalculationData(BaseModel):
+class CalculationReport(BaseModel):
     chat_id: Union[int, str]
     message_thread_id: Union[int, str]
     transaction_type: str        
@@ -61,123 +77,91 @@ class CalculationData(BaseModel):
     total_to_transfer: Any       
     test_info: Optional[str] = "Без теста"
 
-    class Config:
-        extra = "allow"
-
-class StatusUpdateData(BaseModel):
+class DocumentUpload(BaseModel):
     chat_id: Union[int, str]
     message_thread_id: Union[int, str]
-    text: str
-    operator_name: Optional[str] = "Система"
+    file_url: str
 
-    class Config:
-        extra = "allow"
-
-# ---------------------------------------
-
-app = FastAPI()
-bot = Bot(token=BOT_TOKEN)
-
-# --- ОБРАБОТЧИК ОШИБОК ВАЛИДАЦИИ ---
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Кодируем в ascii, чтобы не падать на кириллице в консоли
-    error_str = str(exc.errors()).encode('ascii', 'replace').decode()
-    print(f"Validation Error detail: {error_str}")
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-
-def get_transaction_info(data: TransactionData):
-    if data.transaction_type == "direct":
-        return "ПРЯМАЯ", f"{data.cash_amount} {data.cash_currency}"
-    elif data.transaction_type == "reverse":
-        return "ОБРАТНАЯ", f"{data.wallet_amount} {data.wallet_currency}"
-    return str(data.transaction_type).upper(), "0"
-
-def format_main_message(data: TransactionData, city_name: str, partner_name: str) -> str:
-    wallet_owner_type_text = "Клиентский" if data.wallet_owner_type == "client" else \
-                             "Партнёрский" if data.wallet_owner_type == "partner" else str(data.wallet_owner_type)
-    
-    type_text, amount = get_transaction_info(data)
-
-    return (
-        f"🔄 <b>Тип сделки:</b> <b>{type_text}</b>\n"
-        f"🏛 <b>Город:</b> {city_name}\n"
-        f"🤝 <b>Чья сделка:</b> {partner_name}\n\n"
-        f"👤 <b>Клиент:</b> {data.client_full_name}\n"
-        f"💰 <b>Сумма:</b> {amount}\n\n"
-        f"🏦 <b>Кошелек:</b> <code>{data.wallet_address}</code>\n"
-        f"🌐 <b>Сеть:</b> {data.wallet_network}\n"
-        f"💰 <b>Тип кошелька:</b> {wallet_owner_type_text}\n\n"
-        f"🕒 <b>Дата и время:</b> {data.visit_time}\n\n"
-        f"🔗 <a href='{data.form_url}'>Ссылка на форму</a>"
-    )
+class ProfitabilityIssue(BaseModel):
+    chat_id: Union[int, str]
+    message_thread_id: Union[int, str]
+    is_unprofitable: bool = True
 
 # --- ЭНДПОИНТЫ ---
 
-@app.post("/new-transaction")
-async def handle_transaction(data: TransactionData):
+@app.post("/transaction/create")
+async def create_transaction(data: TransactionCreate):
+    """1. Создание новой транзакции и топика"""
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.get(EXTERNAL_API_URL, timeout=5.0)
             api_values = resp.json()
-        except Exception:
+        except:
             api_values = {}
 
-    departments = api_values.get("DEPARTMENTS", [])
-    city_name = "Неизвестный город"
-    for d in departments:
-        if str(d.get("ID")) == str(data.city_id):
-            city_name = d.get("NAME")
-            break
+    city_name = next((d["NAME"] for d in api_values.get("DEPARTMENTS", []) if str(d["ID"]) == str(data.city_id)), "Неизвестный город")
+    partner_name = next((p["NAME"] for p in api_values.get("PARTNERS", []) if str(p["ID"]) == str(data.brand_id)), "Неизвестный партнер")
 
-    partners_list = api_values.get("PARTNERS", [])
-    partner_name = "Неизвестный партнер"
-    for p in partners_list:
-        if str(p.get("ID")) == str(data.brand_id):
-            partner_name = p.get("NAME")
-            break
+    group_id = CITIES_TO_GROUPS.get(city_name, 0)
+    if not group_id:
+        raise HTTPException(status_code=404, detail=f"Group not found for {city_name}")
 
-    group_id = CITIES_TO_GROUPS.get(city_name)
-    if not group_id or group_id == 0:
-        raise HTTPException(status_code=404, detail=f"Group not found for city: {city_name}")
+    ind_text = "Да, согласовано с @didididi001" if data.individual_conditions == 1 else "Нет"
+    type_text = "ПРЯМАЯ" if data.transaction_type == "direct" else "ОБРАТНАЯ"
+    amount = f"{data.cash_amount} {data.cash_currency}" if data.transaction_type == "direct" else "Сумма в валюте"
 
     try:
-        type_text, amount = get_transaction_info(data)
-        topic_title = f"{type_text} | {amount} | {data.visit_time}"
-        new_topic = await bot.create_forum_topic(chat_id=group_id, name=topic_title)
+        topic = await bot.create_forum_topic(chat_id=group_id, name=f"{type_text} | {amount}")
         
-        await bot.send_message(
-            chat_id=group_id,
-            message_thread_id=new_topic.message_thread_id,
-            text=format_main_message(data, city_name, partner_name),
-            parse_mode="HTML",
-            disable_web_page_preview=True
+        msg = (
+            f"🔄 <b>Тип сделки:</b> {type_text}\n"
+            f"🏛 <b>Город:</b> {city_name}\n"
+            f"🤝 <b>Партнер:</b> {partner_name}\n\n"
+            f"👤 <b>Клиент:</b> {data.client_full_name}\n"
+            f"💰 <b>Сумма:</b> {amount}\n"
+            f"🏦 <b>Кошелек:</b> <code>{data.wallet_address}</code> ({data.wallet_network})\n\n"
+            f"💎 <b>Индивидуальные условия:</b> {ind_text}\n"
+            f"🕒 <b>Время:</b> {data.visit_time}\n"
+            f"🔗 <a href='{data.form_url}'>Открыть форму</a>"
         )
         
-        return {
-            "status": "success",
-            "group_id": group_id,
-            "topic_id": new_topic.message_thread_id,
-        }
+        await bot.send_message(group_id, message_thread_id=topic.message_thread_id, text=msg, parse_mode="HTML")
+        return {"status": "success", "chat_id": group_id, "topic_id": topic.message_thread_id}
     except Exception as e:
-        print(f"Bot error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/transaction-calculation")
-async def handle_calculation(data: CalculationData):
-    try:
-        transaction_type_text = "<b>ПРЯМАЯ</b>" if data.transaction_type == "direct" else \
-                                "<b>ОБРАТНАЯ</b>" if data.transaction_type == "reverse" else data.transaction_type
+@app.post("/transaction/status")
+async def update_status(data: StatusUpdate):
+    """2. Отправка статуса по ключу"""
+    message_text = STATUS_MAP.get(data.status)
+    if not message_text:
+        raise HTTPException(status_code=400, detail="Invalid status key")
 
-        calculation_type_text = "<b>ПРЯМОЙ</b>" if data.calculation_type == "direct" else \
-                                "<b>ОБРАТНЫЙ</b>" if data.calculation_type == "reverse" else data.calculation_type
+    if data.status == "calc_requested" and data.link:
+        message_text += f"\n🔗 <b>Ссылка:</b> {data.link}"
+
+    try:
+        await bot.send_message(
+            chat_id=data.chat_id,
+            message_thread_id=data.message_thread_id,
+            text=f"📢 {message_text}",
+            parse_mode="HTML"
+        )
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/transaction/calculation")
+async def send_calculation(data: CalculationReport):
+    """3. Отправка подробного расчета"""
+    try:
+        t_type = "<b>ПРЯМАЯ</b>" if data.transaction_type == "direct" else "<b>ОБРАТНАЯ</b>"
+        c_type = "<b>ПРЯМОЙ</b>" if data.calculation_type == "direct" else "<b>ОБРАТНЫЙ</b>"
 
         message_text = (
             f"📊 <b>РАСЧЕТ СДЕЛКИ</b>\n\n"
-            f"🔄 <b>Тип сделки:</b> {transaction_type_text}\n"
-            f"📐 <b>Тип просчета:</b> {calculation_type_text}\n"
+            f"🔄 <b>Тип сделки:</b> {t_type}\n"
+            f"📐 <b>Тип просчета:</b> {c_type}\n"
             f"📈 <b>Курс оператора:</b> {data.operator_rate}\n"
             f"📊 <b>Общий процент:</b> {data.total_percentage}\n"
             f"👤 <b>Курс для клиента:</b> {data.client_rate}\n"
@@ -195,21 +179,48 @@ async def handle_calculation(data: CalculationData):
         )
         return {"status": "success"}
     except Exception as e:
-        print(f"Calculation Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/transaction-message")
-async def handle_status_update(data: StatusUpdateData):
+@app.post("/transaction/document")
+async def upload_document(data: DocumentUpload):
+    """4. Скачивание и отправка файла ДКП"""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(data.file_url, timeout=15.0)
+            if response.status_code != 200:
+                return JSONResponse(status_code=400, content={"status": "error", "message": "Download failed"})
+            
+            file_name = data.file_url.split("/")[-1] or "document.doc"
+            if not file_name.lower().endswith(('.doc', '.docx')):
+                file_name += ".doc"
+
+            input_file = BufferedInputFile(response.content, filename=file_name)
+            
+            await bot.send_document(
+                chat_id=data.chat_id,
+                message_thread_id=data.message_thread_id,
+                document=input_file,
+                caption="📝 <b>Распечатай ДКП и дай на подпись клиенту.</b>",
+                parse_mode="HTML"
+            )
+            return {"status": "success"}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"status": "error", "detail": str(e)})
+
+@app.post("/transaction/unprofitable")
+async def notify_unprofitable(data: ProfitabilityIssue):
+    """5. Уведомление о нерентабельности"""
+    if not data.is_unprofitable:
+        return {"status": "ignored"}
     try:
         await bot.send_message(
             chat_id=data.chat_id,
             message_thread_id=data.message_thread_id,
-            text=f"📝 {data.text}",
+            text="⚠️ <b>Волатильность курса, нужно поменять расчет.</b>",
             parse_mode="HTML"
         )
         return {"status": "success"}
     except Exception as e:
-        print(f"Status update Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
