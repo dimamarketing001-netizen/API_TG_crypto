@@ -7,6 +7,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 class Settings(BaseSettings):
     BOT_TOKEN: str
     EXTERNAL_API_URL: str
+
+    BASE_API_URL: str 
     
     DB_USER: str
     DB_PASSWORD: str

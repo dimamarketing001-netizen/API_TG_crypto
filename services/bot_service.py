@@ -3,8 +3,10 @@ import httpx
 from aiogram import Bot
 from core.config import settings
 from core.constants import CITIES_TO_GROUPS, OPERATORS_TO_GROUPS
-from db.repository import get_online_operators
+from db.repository import get_online_operators, create_task_log
 from services.operator_logic import balancer 
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import datetime
 
 bot = Bot(token=settings.BOT_TOKEN)
 
@@ -68,29 +70,49 @@ class BotService:
         return {"chat_id": group_id, "topic_id": topic.message_thread_id}
 
     @staticmethod
-    @staticmethod
     async def assign_operator_and_notify(data):
-        """Улучшенное распределение задач"""
-        # Вызываем умный балансировщик
         target_op = await balancer.get_next_operator()
-        
         if not target_op:
             return "🔴 Нет операторов онлайн"
 
         op_id = str(target_op['personal_telegram_id'])
         op_user = target_op['personal_telegram_username']
-        
+        assigned_time = datetime.now()
+
+        # 1. Сохраняем лог в БД и получаем ID задачи
+        task_id = await create_task_log(
+            operator_id=op_id,
+            chat_id=str(data.chat_id),
+            thread_id=data.message_thread_id,
+            form_url=data.link,
+            assigned_at=assigned_time
+        )
+
         op_group = OPERATORS_TO_GROUPS.get(op_id)
         if op_group:
             clean_id = str(data.chat_id).replace("-100", "")
             topic_url = f"https://t.me/c/{clean_id}/{data.message_thread_id}"
             
+            # 2. Создаем кнопку с ссылкой на наш API для отслеживания
+            tracking_url = f"{settings.BASE_API_URL}/click/{task_id}"
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📝 ОТКРЫТЬ ФОРМУ", url=tracking_url)],
+                [InlineKeyboardButton(text="💬 ПЕРЕЙТИ В ЧАТ", url=topic_url)]
+            ])
+
             task_msg = (
                 f"🎯 <b>НОВАЯ ЗАДАЧА НА РАСЧЕТ</b>\n\n"
-                f"🔗 <a href='{data.link}'>ОТКРЫТЬ ФОРМУ</a>\n"
-                f"💬 <a href='{topic_url}'>ПЕРЕЙТИ В ЧАТ</a>"
+                f"🕒 Поставлена: <code>{assigned_time.strftime('%H:%M:%S')}</code>\n"
+                f"👷 Оператор: @{op_user}"
             )
-            await bot.send_message(chat_id=op_group, text=task_msg, parse_mode="HTML")
+            
+            await bot.send_message(
+                chat_id=op_group, 
+                text=task_msg, 
+                parse_mode="HTML", 
+                reply_markup=keyboard
+            )
             return f"@{op_user}"
         
         return f"@{op_user} (группа не настроена)"

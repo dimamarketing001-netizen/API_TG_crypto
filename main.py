@@ -9,6 +9,9 @@ from services.bot_service import BotService, bot
 from core.constants import STATUS_MAP
 from aiogram.types import BufferedInputFile
 from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData, DocumentData
+from fastapi.responses import RedirectResponse
+from db.repository import log_task_click
+from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 
@@ -128,7 +131,22 @@ async def notify_unprofitable(data: ProfitabilityData):
     except Exception as e:
         logging.error(f"Unprofitable notify error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/click/{task_id}")
+async def track_op_click(task_id: int):
+    """Эндпоинт для фиксации клика оператора"""
+    click_time = datetime.now()
     
+    # Фиксируем время в БД и получаем оригинальный URL
+    original_form_url = await log_task_click(task_id, click_time)
+    
+    if original_form_url:
+        logging.info(f"Operator clicked task {task_id} at {click_time}")
+        # Мгновенно перенаправляем на форму
+        return RedirectResponse(url=original_form_url)
+    
+    return {"status": "error", "message": "Task not found"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=4000)
