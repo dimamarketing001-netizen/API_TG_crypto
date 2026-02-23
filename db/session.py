@@ -1,4 +1,4 @@
-import asyncpg
+import aiomysql
 from core.config import settings
 
 class Database:
@@ -7,14 +7,20 @@ class Database:
 
     async def connect(self):
         if not self.pool:
-            self.pool = await asyncpg.create_pool(
-                dsn=settings.db_url,
-                min_size=5,
-                max_size=20
+            self.pool = await aiomysql.create_pool(
+                host=settings.DB_HOST,
+                port=settings.DB_PORT,
+                user=settings.DB_USER,
+                password=settings.DB_PASSWORD,
+                db=settings.DB_NAME,
+                minsize=5,
+                maxsize=20,
+                autocommit=True  
             )
 
     async def disconnect(self):
         if self.pool:
-            await self.pool.close()
+            self.pool.close()
+            await self.pool.wait_closed()
 
 db = Database()

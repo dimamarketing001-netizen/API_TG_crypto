@@ -1,11 +1,14 @@
+import aiomysql
 from db.session import db
 
 async def get_online_operators():
-    """Возвращает список всех онлайн операторов"""
-    query = """
-        SELECT personal_telegram_id, personal_telegram_username 
-        FROM employees 
-        WHERE status = 'online' AND role = 'Operator'
-    """
+    """Возвращает список онлайн операторов в виде списка словарей"""
     async with db.pool.acquire() as conn:
-        return await conn.fetch(query)
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            query = """
+                SELECT personal_telegram_id, personal_telegram_username 
+                FROM employees 
+                WHERE status = 'online' AND role = 'Operator'
+            """
+            await cur.execute(query)
+            return await cur.fetchall()
