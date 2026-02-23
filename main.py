@@ -27,16 +27,27 @@ async def create_tx(data: TransactionCreate):
 
 @app.post("/transaction/status")
 async def update_status(data: StatusUpdate):
-    msg = STATUS_MAP.get(data.status, "Обновление")
-    op_tag = None
+    msg = STATUS_MAP.get(data.status, "🔔 Обновление")
+    op_tag = "Не назначен"
 
     if data.status == "calc_requested":
+        # ВЫЗОВ ДОЛЖЕН СОВПАДАТЬ С ИМЕНЕМ В BotService
         op_tag = await BotService.assign_operator_and_notify(data)
-        msg += f"\n👨‍💻 Назначен: {op_tag}"
-        if data.link: msg += f"\n🔗 {data.link}"
+        msg += f"\n\n👨‍💻 <b>Оператор:</b> {op_tag}"
+        if data.link:
+            msg += f"\n🔗 <a href='{data.link}'>Ссылка на расчет</a>"
 
-    await bot.send_message(data.chat_id, message_thread_id=data.message_thread_id, text=f"📢 {msg}", parse_mode="HTML")
-    return {"status": "success", "operator": op_tag}
+    try:
+        await bot.send_message(
+            chat_id=data.chat_id, 
+            message_thread_id=data.message_thread_id, 
+            text=f"📢 {msg}", 
+            parse_mode="HTML"
+        )
+        return {"status": "success", "operator": op_tag}
+    except Exception as e:
+        logging.error(f"TG send error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/transaction/calculation")
 async def send_calc(data: CalculationReport):
