@@ -4,6 +4,7 @@ from aiogram import Bot
 from core.config import settings
 from core.constants import CITIES_TO_GROUPS, OPERATORS_TO_GROUPS
 from db.repository import get_online_operators
+from services.operator_logic import balancer 
 
 bot = Bot(token=settings.BOT_TOKEN)
 
@@ -67,12 +68,15 @@ class BotService:
         return {"chat_id": group_id, "topic_id": topic.message_thread_id}
 
     @staticmethod
+    @staticmethod
     async def assign_operator_and_notify(data):
-        """Распределение операторов (MySQL)"""
-        operators = await get_online_operators()
-        if not operators: return "🔴 Нет операторов онлайн"
+        """Улучшенное распределение задач"""
+        # Вызываем умный балансировщик
+        target_op = await balancer.get_next_operator()
+        
+        if not target_op:
+            return "🔴 Нет операторов онлайн"
 
-        target_op = random.choice(operators)
         op_id = str(target_op['personal_telegram_id'])
         op_user = target_op['personal_telegram_username']
         
@@ -80,7 +84,13 @@ class BotService:
         if op_group:
             clean_id = str(data.chat_id).replace("-100", "")
             topic_url = f"https://t.me/c/{clean_id}/{data.message_thread_id}"
-            task_msg = f"🎯 <b>ЗАДАЧА НА РАСЧЕТ</b>\n\n🔗 <a href='{data.link}'>ФОРМА</a>\n💬 <a href='{topic_url}'>ЧАТ</a>"
+            
+            task_msg = (
+                f"🎯 <b>НОВАЯ ЗАДАЧА НА РАСЧЕТ</b>\n\n"
+                f"🔗 <a href='{data.link}'>ОТКРЫТЬ ФОРМУ</a>\n"
+                f"💬 <a href='{topic_url}'>ПЕРЕЙТИ В ЧАТ</a>"
+            )
             await bot.send_message(chat_id=op_group, text=task_msg, parse_mode="HTML")
             return f"@{op_user}"
+        
         return f"@{op_user} (группа не настроена)"
