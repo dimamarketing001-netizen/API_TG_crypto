@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
     DB_HOST: str
     DB_NAME: str
-    DB_PORT: int = 5432
+    DB_PORT: int = 3306
 
     @property
     def db_url(self):
