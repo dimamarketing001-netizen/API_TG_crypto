@@ -8,7 +8,7 @@ from models.schemas import TransactionData, CalculationData, StatusUpdateData
 from services.bot_service import BotService, bot
 from core.constants import STATUS_MAP
 from aiogram.types import BufferedInputFile
-from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData
+from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData, DocumentData
 
 logging.basicConfig(level=logging.INFO)
 
@@ -69,14 +69,38 @@ async def send_calc(data: CalculationData):
     return {"status": "success"}
 
 @app.post("/transaction/document")
-async def upload_doc(data: Any): # Используем Any для гибкости или создай схему
+async def upload_doc(data: DocumentData):
+    """Скачивание файла по ссылке и отправка в Telegram"""
     async with httpx.AsyncClient() as client:
-        resp = await client.get(data.file_url)
-        if resp.status_code == 200:
-            file = BufferedInputFile(resp.content, filename="dkp.doc")
-            await bot.send_document(data.chat_id, message_thread_id=data.message_thread_id, document=file, caption="📝 ДКП для подписи")
-            return {"status": "success"}
-    return {"status": "error"}
+        try:
+            # Скачиваем файл (ставим таймаут побольше для тяжелых файлов)
+            resp = await client.get(data.file_url, timeout=20.0)
+            
+            if resp.status_code != 200:
+                logging.error(f"Failed to download file: {resp.status_code}")
+                raise HTTPException(status_code=400, detail="Could not download file from provided URL")
+
+            # Определяем имя файла из URL или ставим дефолтное
+            file_name = data.file_url.split("/")[-1] or "document.doc"
+            if "." not in file_name:
+                file_name += ".doc"
+
+            # Формируем файл для aiogram
+            input_file = BufferedInputFile(resp.content, filename=file_name)
+            
+            await bot.send_document(
+                chat_id=data.chat_id,
+                message_thread_id=data.message_thread_id,
+                document=input_file,
+                caption="📝 <b>Распечатай ДКП и дай на подпись клиенту.</b>",
+                parse_mode="HTML"
+            )
+            
+            return {"status": "success", "file_sent": file_name}
+            
+        except Exception as e:
+            logging.error(f"Document upload error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/transaction/unprofitable")
 async def notify_unprofitable(data: ProfitabilityData):

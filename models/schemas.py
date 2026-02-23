@@ -45,3 +45,9 @@ class ProfitabilityData(BaseModel):
     message_thread_id: Union[int, str]
     is_unprofitable: bool = True
     model_config = ConfigDict(extra="allow")
+
+class DocumentData(BaseModel):
+    chat_id: Union[int, str]
+    message_thread_id: Union[int, str]
+    file_url: str
+    model_config = ConfigDict(extra="allow")
