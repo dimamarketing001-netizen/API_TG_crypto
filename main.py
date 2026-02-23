@@ -8,6 +8,7 @@ from models.schemas import TransactionData, CalculationData, StatusUpdateData
 from services.bot_service import BotService, bot
 from core.constants import STATUS_MAP
 from aiogram.types import BufferedInputFile
+from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData
 
 logging.basicConfig(level=logging.INFO)
 
@@ -77,6 +78,24 @@ async def upload_doc(data: Any): # Используем Any для гибкос�
             return {"status": "success"}
     return {"status": "error"}
 
+@app.post("/transaction/unprofitable")
+async def notify_unprofitable(data: ProfitabilityData):
+    """Уведомление о волатильности курса"""
+    if not data.is_unprofitable:
+        return {"status": "ignored"}
+        
+    try:
+        await bot.send_message(
+            chat_id=data.chat_id,
+            message_thread_id=data.message_thread_id,
+            text="⚠️ <b>Волатильность курса, нужно поменять расчет.</b>",
+            parse_mode="HTML"
+        )
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Unprofitable notify error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=4000)

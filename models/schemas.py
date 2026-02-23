@@ -39,3 +39,9 @@ class StatusUpdateData(BaseModel):
     operator_name: Optional[str] = "Система"
     link: Optional[str] = None 
     model_config = ConfigDict(extra="allow")
+
+class ProfitabilityData(BaseModel):
+    chat_id: Union[int, str]
+    message_thread_id: Union[int, str]
+    is_unprofitable: bool = True
+    model_config = ConfigDict(extra="allow")
