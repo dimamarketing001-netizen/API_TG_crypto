@@ -33,10 +33,10 @@ async def create_tx(data: TransactionData):
 @app.post("/transaction/status")
 async def update_status(data: StatusUpdateData):
     # Берем текст из STATUS_MAP или используем переданный текст
-    msg = STATUS_MAP.get(data.text, data.text)
+    msg = STATUS_MAP.get(data.status, data.status)
     op_tag = "Система"
 
-    if data.text == "calc_requested":
+    if data.status == "calc_requested":
         op_tag = await BotService.assign_operator_and_notify(data)
         msg = f"📩 <b>Запросили расчет</b>\n\n👨‍💻 <b>Оператор:</b> {op_tag}"
         if data.link:

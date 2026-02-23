@@ -35,7 +35,7 @@ class CalculationData(BaseModel):
 class StatusUpdateData(BaseModel):
     chat_id: Union[int, str]
     message_thread_id: Union[int, str]
-    text: str
+    status: str
     operator_name: Optional[str] = "Система"
     link: Optional[str] = None 
     model_config = ConfigDict(extra="allow")
