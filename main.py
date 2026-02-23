@@ -70,34 +70,43 @@ async def send_calc(data: CalculationData):
 
 @app.post("/transaction/document")
 async def upload_doc(data: DocumentData):
-    """Скачивание файла по ссылке и отправка в Telegram"""
+    """Скачивание PDF по ссылке и отправка в Telegram"""
     async with httpx.AsyncClient() as client:
         try:
-            # Скачиваем файл (ставим таймаут побольше для тяжелых файлов)
-            resp = await client.get(data.file_url, timeout=20.0)
+            # 1. Скачиваем файл
+            resp = await client.get(data.file_url, timeout=30.0)
             
             if resp.status_code != 200:
-                logging.error(f"Failed to download file: {resp.status_code}")
-                raise HTTPException(status_code=400, detail="Could not download file from provided URL")
+                logging.error(f"Failed to download PDF: {resp.status_code}")
+                raise HTTPException(status_code=400, detail="Ошибка при скачивании файла по ссылке")
 
-            # Определяем имя файла из URL или ставим дефолтное
-            file_name = data.file_url.split("/")[-1] or "document.doc"
-            if "." not in file_name:
-                file_name += ".doc"
+            # 2. Логика определения имени файла
+            # Берем имя из URL (удаляем параметры запроса, если они есть)
+            original_name = data.file_url.split("/")[-1].split("?")[0]
+            
+            # Если имя пустое или не заканчивается на .pdf, принудительно ставим dkp.pdf
+            if not original_name.lower().endswith(".pdf"):
+                file_name = "dkp_document.pdf"
+            else:
+                file_name = original_name
 
-            # Формируем файл для aiogram
+            # 3. Подготовка файла для Telegram (BufferedInputFile работает в памяти)
             input_file = BufferedInputFile(resp.content, filename=file_name)
             
+            # 4. Отправка документа
             await bot.send_document(
                 chat_id=data.chat_id,
                 message_thread_id=data.message_thread_id,
                 document=input_file,
-                caption="📝 <b>Распечатай ДКП и дай на подпись клиенту.</b>",
+                caption="📄 <b>ДКП готов (PDF). Распечатай и дай на подпись клиенту.</b>",
                 parse_mode="HTML"
             )
             
-            return {"status": "success", "file_sent": file_name}
+            logging.info(f"PDF sent successfully: {file_name} to chat {data.chat_id}")
+            return {"status": "success", "file": file_name}
             
+        except httpx.ReadTimeout:
+            raise HTTPException(status_code=504, detail="Превышено время ожидания скачивания файла")
         except Exception as e:
             logging.error(f"Document upload error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
