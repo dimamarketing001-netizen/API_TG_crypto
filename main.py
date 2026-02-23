@@ -2,8 +2,9 @@ import logging
 import httpx
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
+from typing import Any
 from db.session import db
-from models.schemas import TransactionCreate, StatusUpdate, CalculationReport, DocumentUpload
+from models.schemas import TransactionData, CalculationData, StatusUpdateData
 from services.bot_service import BotService, bot
 from core.constants import STATUS_MAP
 from aiogram.types import BufferedInputFile
@@ -20,43 +21,54 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="CryptoOps API", lifespan=lifespan)
 
 @app.post("/transaction/create")
-async def create_tx(data: TransactionCreate):
+async def create_tx(data: TransactionData):
     result = await BotService.create_transaction_topic(data)
     if not result: raise HTTPException(status_code=404, detail="City not found")
-    return result
+    return {"status": "success", **result}
 
 @app.post("/transaction/status")
-async def update_status(data: StatusUpdate):
-    msg = STATUS_MAP.get(data.status, "🔔 Обновление")
-    op_tag = "Не назначен"
+async def update_status(data: StatusUpdateData):
+    # Берем текст из STATUS_MAP или используем переданный текст
+    msg = STATUS_MAP.get(data.text, data.text)
+    op_tag = "Система"
 
-    if data.status == "calc_requested":
-        # ВЫЗОВ ДОЛЖЕН СОВПАДАТЬ С ИМЕНЕМ В BotService
+    if data.text == "calc_requested":
         op_tag = await BotService.assign_operator_and_notify(data)
-        msg += f"\n\n👨‍💻 <b>Оператор:</b> {op_tag}"
+        msg = f"📩 <b>Запросили расчет</b>\n\n👨‍💻 <b>Оператор:</b> {op_tag}"
         if data.link:
             msg += f"\n🔗 <a href='{data.link}'>Ссылка на расчет</a>"
 
-    try:
-        await bot.send_message(
-            chat_id=data.chat_id, 
-            message_thread_id=data.message_thread_id, 
-            text=f"📢 {msg}", 
-            parse_mode="HTML"
-        )
-        return {"status": "success", "operator": op_tag}
-    except Exception as e:
-        logging.error(f"TG send error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    await bot.send_message(
+        chat_id=data.chat_id, 
+        message_thread_id=data.message_thread_id, 
+        text=f"📢 {msg}", 
+        parse_mode="HTML"
+    )
+    return {"status": "success", "operator": op_tag}
 
 @app.post("/transaction/calculation")
-async def send_calc(data: CalculationReport):
-    msg = f"📊 <b>РАСЧЕТ СДЕЛКИ</b>\n\n✅ ИТОГ: <b>{data.total_to_transfer}</b>"
-    await bot.send_message(data.chat_id, message_thread_id=data.message_thread_id, text=msg, parse_mode="HTML")
+async def send_calc(data: CalculationData):
+    """Текст расчета полностью из исходника"""
+    t_type = "<b>ПРЯМАЯ</b>" if data.transaction_type == "direct" else "<b>ОБРАТНАЯ</b>"
+    c_type = "<b>ПРЯМОЙ</b>" if data.calculation_type == "direct" else "<b>ОБРАТНЫЙ</b>"
+
+    message_text = (
+        f"📊 <b>РАСЧЕТ СДЕЛКИ</b>\n\n"
+        f"🔄 <b>Тип сделки:</b> {t_type}\n"
+        f"📐 <b>Тип просчета:</b> {c_type}\n"
+        f"📈 <b>Курс оператора:</b> {data.operator_rate}\n"
+        f"📊 <b>Общий процент:</b> {data.total_percentage}\n"
+        f"👤 <b>Курс для клиента:</b> {data.client_rate}\n"
+        f"💸 <b>Комиссия за сделку:</b> {data.fee}\n\n"
+        f"📝 <b>Формула:</b>\n<code>{data.formula}</code>\n\n"
+        f"✅ <b>Итог к переводу:</b> <b>{data.total_to_transfer}</b>\n"
+        f"🧪 <b>Тест:</b> {data.test_info}"
+    )
+    await bot.send_message(data.chat_id, message_thread_id=data.message_thread_id, text=message_text, parse_mode="HTML")
     return {"status": "success"}
 
 @app.post("/transaction/document")
-async def upload_doc(data: DocumentUpload):
+async def upload_doc(data: Any): # Используем Any для гибкости или создай схему
     async with httpx.AsyncClient() as client:
         resp = await client.get(data.file_url)
         if resp.status_code == 200:
