@@ -10,7 +10,7 @@ from models.schemas import TransactionData, CalculationData, StatusUpdateData, P
 from fastapi.responses import RedirectResponse
 from datetime import datetime
 from aiogram import Dispatcher, types, F
-from services.bot_service import BotService, bot, TaskCB, TaskData
+from services.bot_service import BotService, bot, TaskCB
 from db.repository import (
     update_task_status, 
     set_expected_amount, 
