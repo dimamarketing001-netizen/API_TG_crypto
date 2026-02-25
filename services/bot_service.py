@@ -7,8 +7,14 @@ from db.repository import get_online_operators, create_task_log
 from services.operator_logic import balancer 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters.callback_data import CallbackData
 
 bot = Bot(token=settings.BOT_TOKEN)
+
+class TaskCB(CallbackData, prefix="task"):
+    action: str
+    id: int
 
 class BotService:
     @staticmethod
@@ -70,49 +76,44 @@ class BotService:
         return {"chat_id": group_id, "topic_id": topic.message_thread_id}
 
     @staticmethod
+    def get_task_keyboard(task_id: int, status: str, form_url: str = "#"):
+        kb = []
+        if status == "pending":
+            kb.append([InlineKeyboardButton(text="✅ Принять и перейти", callback_data=TaskCB(action="accept", id=task_id).pack())])
+        elif status == "active":
+            kb.append([InlineKeyboardButton(text="🔗 Открыть форму", url=form_url)])
+            kb.append([InlineKeyboardButton(text="⏸ Пауза", callback_data=TaskCB(action="pause", id=task_id).pack())])
+            kb.append([InlineKeyboardButton(text="🏁 Завершить", callback_data=TaskCB(action="complete", id=task_id).pack())])
+        elif status == "paused":
+            kb.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data=TaskCB(action="resume", id=task_id).pack())])
+        
+        return InlineKeyboardMarkup(inline_keyboard=kb)
+
+    @staticmethod
     async def assign_operator_and_notify(data):
-        target_op = await balancer.get_next_operator()
-        if not target_op:
-            return "🔴 Нет операторов онлайн"
-
-        op_id = str(target_op['personal_telegram_id'])
-        op_user = target_op['personal_telegram_username']
+        target_op = await balancer.get_available_operator()
+        
+        # Если нет свободных — создаем задачу в статусе 'pending' без уведомления (она в очереди)
+        status = "pending" if target_op else "pending" 
+        # (В вашем случае мы всегда создаем pending, а если есть оператор — сразу шлем ему)
+        
         assigned_time = datetime.now()
-
-        # 1. Сохраняем лог в БД и получаем ID задачи
         task_id = await create_task_log(
-            operator_id=op_id,
+            operator_id=str(target_op['personal_telegram_id']) if target_op else "queue",
             chat_id=str(data.chat_id),
             thread_id=data.message_thread_id,
             form_url=data.link,
             assigned_at=assigned_time
         )
 
-        op_group = OPERATORS_TO_GROUPS.get(op_id)
-        if op_group:
-            clean_id = str(data.chat_id).replace("-100", "")
-            topic_url = f"https://t.me/c/{clean_id}/{data.message_thread_id}"
-            
-            # 2. Создаем кнопку с ссылкой на наш API для отслеживания
-            tracking_url = f"{settings.BASE_API_URL}/click/{task_id}"
-            
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📝 ОТКРЫТЬ ФОРМУ", url=tracking_url)],
-                [InlineKeyboardButton(text="💬 ПЕРЕЙТИ В ЧАТ", url=topic_url)]
-            ])
-
-            task_msg = (
-                f"🎯 <b>НОВАЯ ЗАДАЧА НА РАСЧЕТ</b>\n\n"
-                f"🕒 Поставлена: <code>{assigned_time.strftime('%H:%M:%S')}</code>\n"
-                f"👷 Оператор: @{op_user}"
-            )
-            
+        if target_op:
+            op_group = OPERATORS_TO_GROUPS.get(str(target_op['personal_telegram_id']))
             await bot.send_message(
-                chat_id=op_group, 
-                text=task_msg, 
-                parse_mode="HTML", 
-                reply_markup=keyboard
+                chat_id=op_group,
+                text=f"🆕 <b>Новая задача на расчет!</b>\nТопик: {data.message_thread_id}",
+                reply_markup=BotService.get_task_keyboard(task_id, "pending"),
+                parse_mode="HTML"
             )
-            return f"@{op_user}"
+            return f"@{target_op['personal_telegram_username']}"
         
-        return f"@{op_user} (группа не настроена)"
+        return "⏳ В очереди (все заняты)"

@@ -5,20 +5,40 @@ from contextlib import asynccontextmanager
 from typing import Any
 from db.session import db
 from models.schemas import TransactionData, CalculationData, StatusUpdateData
-from services.bot_service import BotService, bot
-from core.constants import STATUS_MAP
 from aiogram.types import BufferedInputFile
 from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData, DocumentData
 from fastapi.responses import RedirectResponse
-from db.repository import log_task_click
 from datetime import datetime
+from aiogram import Dispatcher, types, F
+from services.bot_service import BotService, bot, TaskCB, TaskData
+from db.repository import (
+    update_task_status, 
+    set_expected_amount, 
+    get_task_by_id, 
+    log_task_click,
+    get_last_active_task,  
+    get_oldest_pending_task
+)
+import asyncio
+from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
 
 logging.basicConfig(level=logging.INFO)
 
+dp = Dispatcher()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # При старте
     await db.connect()
+    
+    # Запускаем polling бота в фоновом режиме, чтобы кнопки работали
+    polling_task = asyncio.create_task(dp.start_polling(bot))
+    logging.info("Aiogram Polling started")
+    
     yield
+    
+    # При выключении
+    polling_task.cancel()
     await db.disconnect()
     await bot.session.close()
 
@@ -52,6 +72,9 @@ async def update_status(data: StatusUpdateData):
 
 @app.post("/transaction/calculation")
 async def send_calc(data: CalculationData):
+    amount = float(''.join(filter(lambda x: x.isdigit() or x == '.', str(data.total_to_transfer))))
+    await set_expected_amount(data.chat_id, data.message_thread_id, amount)
+    
     """Текст расчета полностью из исходника"""
     t_type = "<b>ПРЯМАЯ</b>" if data.transaction_type == "direct" else "<b>ОБРАТНАЯ</b>"
     c_type = "<b>ПРЯМОЙ</b>" if data.calculation_type == "direct" else "<b>ОБРАТНЫЙ</b>"
@@ -146,6 +169,61 @@ async def track_op_click(task_id: int):
         return RedirectResponse(url=original_form_url)
     
     return {"status": "error", "message": "Task not found"}
+# 1. Нажатие "Принять и перейти"
+@dp.callback_query(TaskCB.filter(F.action == "accept"))
+async def handle_accept(query: types.CallbackQuery, callback_data: TaskCB):
+    task = await get_task_by_id(callback_data.id)
+    await update_task_status(callback_data.id, "active")
+    
+    await query.message.edit_text(
+        f"{query.message.text}\n\n🟢 <b>В работе</b>",
+        reply_markup=BotService.get_task_keyboard(callback_data.id, "active", task['form_url']),
+        parse_mode="HTML"
+    )
+    await query.answer("Задача принята в работу!")
+
+# 2. Нажатие "Пауза"
+@dp.callback_query(TaskCB.filter(F.action == "pause"))
+async def handle_pause(query: types.CallbackQuery, callback_data: TaskCB):
+    await update_task_status(callback_data.id, "paused")
+    await query.message.edit_reply_markup(reply_markup=BotService.get_task_keyboard(callback_data.id, "paused"))
+    await query.answer("Задача на паузе. Вы свободны для новых задач.")
+
+# 3. Нажатие "Завершить" (Запрос ссылки)
+@dp.callback_query(TaskCB.filter(F.action == "complete"))
+async def handle_complete_request(query: types.CallbackQuery, callback_data: TaskCB):
+    await query.message.answer(f"🏁 Для завершения задачи #{callback_data.id} пришлите ссылку на блокчейн транзакцию.")
+    await query.answer()
+
+# 4. Обработка входящей ссылки и сверка суммы
+@dp.message(F.text.contains("hash") | F.text.contains("tx") | F.text.contains("tronscan"))
+async def verify_transaction(message: types.Message):
+    # ТУТ ВАШ ПАРСЕР (имитация)
+    found_amount = 100.5 
+    
+    task = await get_last_active_task(message.from_user.id) 
+    
+    if task and float(found_amount) == float(task['expected_amount']):
+        # 1. Завершаем текущую задачу
+        await update_task_status(task['id'], "completed")
+        await message.answer("✅ Сумма совпала! Задача завершена.")
+        
+        # 2. ПРОВЕРКА ОЧЕРЕДИ: Есть ли ожидающие задачи?
+        pending_task = await get_oldest_pending_task()
+        if pending_task:
+            # Назначаем эту задачу освободившемуся оператору
+            await update_task_status(pending_task['id'], "pending") # Статус остается pending до нажатия "Принять"
+            
+            # В репозитории нужно добавить функцию смены оператора для задачи в очереди
+            # Или просто отправить сообщение оператору
+            op_group = OPERATORS_TO_GROUPS.get(str(message.from_user.id))
+            await bot.send_message(
+                chat_id=op_group,
+                text=f"📥 <b>У вас новая задача из очереди!</b>\nТопик: {pending_task['message_thread_id']}",
+                reply_markup=BotService.get_task_keyboard(pending_task['id'], "pending")
+            )
+    else:
+        await message.answer("❌ Ошибка сверки суммы.")
 
 if __name__ == "__main__":
     import uvicorn
