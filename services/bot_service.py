@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters.callback_data import CallbackData
+import logging
 
 bot = Bot(token=settings.BOT_TOKEN)
 
@@ -91,29 +92,51 @@ class BotService:
 
     @staticmethod
     async def assign_operator_and_notify(data):
+        """Улучшенное распределение задач с защитой от ошибок"""
+        # 1. Получаем свободного оператора через балансировщик
         target_op = await balancer.get_available_operator()
-        
-        # Если нет свободных — создаем задачу в статусе 'pending' без уведомления (она в очереди)
-        status = "pending" if target_op else "pending" 
-        # (В вашем случае мы всегда создаем pending, а если есть оператор — сразу шлем ему)
-        
         assigned_time = datetime.now()
+        
+        # Если никто не онлайн или все заняты
+        if not target_op:
+            await create_task_log(
+                operator_id="queue",
+                chat_id=str(data.chat_id),
+                thread_id=data.message_thread_id,
+                form_url=data.link,
+                assigned_at=assigned_time
+            )
+            return "⏳ В очереди (все заняты)"
+
+        op_id = str(target_op['personal_telegram_id'])
+        op_user = target_op['personal_telegram_username']
+        
+        # 2. Создаем запись в логах задач
         task_id = await create_task_log(
-            operator_id=str(target_op['personal_telegram_id']) if target_op else "queue",
+            operator_id=op_id,
             chat_id=str(data.chat_id),
             thread_id=data.message_thread_id,
             form_url=data.link,
             assigned_at=assigned_time
         )
 
-        if target_op:
-            op_group = OPERATORS_TO_GROUPS.get(str(target_op['personal_telegram_id']))
-            await bot.send_message(
-                chat_id=op_group,
-                text=f"🆕 <b>Новая задача на расчет!</b>\nТопик: {data.message_thread_id}",
-                reply_markup=BotService.get_task_keyboard(task_id, "pending"),
-                parse_mode="HTML"
-            )
-            return f"@{target_op['personal_telegram_username']}"
+        # 3. Ищем группу оператора в константах
+        op_group = OPERATORS_TO_GROUPS.get(op_id)
         
-        return "⏳ В очереди (все заняты)"
+        if op_group:
+            try:
+                # Отправляем сообщение только если op_group существует
+                await bot.send_message(
+                    chat_id=op_group,
+                    text=f"🆕 <b>Новая задача на расчет!</b>\nТопик: {data.message_thread_id}",
+                    reply_markup=BotService.get_task_keyboard(task_id, "pending"),
+                    parse_mode="HTML"
+                )
+                return f"@{op_user}"
+            except Exception as e:
+                logging.error(f"Ошибка отправки в TG для оператора {op_id}: {e}")
+                return f"@{op_user} (ошибка связи с TG)"
+        else:
+            # Если оператор есть в БД, но его ID нет в OPERATORS_TO_GROUPS в constants.py
+            logging.error(f"КРИТИЧЕСКАЯ ОШИБКА: Оператор {op_id} (@{op_user}) онлайн, но его ID не прописан в OPERATORS_TO_GROUPS!")
+            return f"@{op_user} (настройте группу оператора!)"
