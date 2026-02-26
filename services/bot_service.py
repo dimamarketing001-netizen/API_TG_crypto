@@ -82,61 +82,53 @@ class BotService:
         if status == "pending":
             kb.append([InlineKeyboardButton(text="✅ Принять и перейти", callback_data=TaskCB(action="accept", id=task_id).pack())])
         elif status == "active":
+            # Важно: здесь ссылка на форму
             kb.append([InlineKeyboardButton(text="🔗 Открыть форму", url=form_url)])
             kb.append([InlineKeyboardButton(text="⏸ Пауза", callback_data=TaskCB(action="pause", id=task_id).pack())])
             kb.append([InlineKeyboardButton(text="🏁 Завершить", callback_data=TaskCB(action="complete", id=task_id).pack())])
         elif status == "paused":
+            # Кнопка для возврата в работу
             kb.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data=TaskCB(action="resume", id=task_id).pack())])
         
         return InlineKeyboardMarkup(inline_keyboard=kb)
 
     @staticmethod
     async def assign_operator_and_notify(data):
-        """Улучшенное распределение задач с защитой от ошибок"""
-        # 1. Получаем свободного оператора через балансировщик
+        from db.repository import create_task_log, update_operator_thread # Локальный импорт
+        
         target_op = await balancer.get_available_operator()
         assigned_time = datetime.now()
         
-        # Если никто не онлайн или все заняты
         if not target_op:
-            await create_task_log(
-                operator_id="queue",
-                chat_id=str(data.chat_id),
-                thread_id=data.message_thread_id,
-                form_url=data.link,
-                assigned_at=assigned_time
-            )
+            await create_task_log("queue", str(data.chat_id), data.message_thread_id, data.link, assigned_time)
             return "⏳ В очереди (все заняты)"
 
         op_id = str(target_op['personal_telegram_id'])
         op_user = target_op['personal_telegram_username']
-        
-        # 2. Создаем запись в логах задач
-        task_id = await create_task_log(
-            operator_id=op_id,
-            chat_id=str(data.chat_id),
-            thread_id=data.message_thread_id,
-            form_url=data.link,
-            assigned_at=assigned_time
-        )
-
-        # 3. Ищем группу оператора в константах
         op_group = OPERATORS_TO_GROUPS.get(op_id)
-        
+
+        task_id = await create_task_log(op_id, str(data.chat_id), data.message_thread_id, data.link, assigned_time)
+
         if op_group:
             try:
-                # Отправляем сообщение только если op_group существует
+                # 1. СОЗДАЕМ ТЕМУ В ГРУППЕ ОПЕРАТОРА (1 задача = 1 тема)
+                topic_name = f"Заявка #{task_id} | Топик {data.message_thread_id}"
+                new_op_topic = await bot.create_forum_topic(chat_id=op_group, name=topic_name)
+                
+                # Сохраняем ID этой темы в БД
+                await update_operator_thread(task_id, new_op_topic.message_thread_id)
+
+                # 2. ШЛЕМ СООБЩЕНИЕ В ЭТУ ТЕМУ
                 await bot.send_message(
                     chat_id=op_group,
-                    text=f"🆕 <b>Новая задача на расчет!</b>\nТопик: {data.message_thread_id}",
+                    message_thread_id=new_op_topic.message_thread_id,
+                    text=f"🆕 <b>Новая задача на расчет!</b>\nПоставлена: {assigned_time.strftime('%H:%M:%S')}",
                     reply_markup=BotService.get_task_keyboard(task_id, "pending"),
                     parse_mode="HTML"
                 )
                 return f"@{op_user}"
             except Exception as e:
-                logging.error(f"Ошибка отправки в TG для оператора {op_id}: {e}")
-                return f"@{op_user} (ошибка связи с TG)"
-        else:
-            # Если оператор есть в БД, но его ID нет в OPERATORS_TO_GROUPS в constants.py
-            logging.error(f"КРИТИЧЕСКАЯ ОШИБКА: Оператор {op_id} (@{op_user}) онлайн, но его ID не прописан в OPERATORS_TO_GROUPS!")
-            return f"@{op_user} (настройте группу оператора!)"
+                logging.error(f"Ошибка создания темы для оператора {op_id}: {e}")
+                return f"@{op_user} (ошибка создания темы)"
+        
+        return f"@{op_user} (группа не настроена)"

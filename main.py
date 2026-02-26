@@ -17,7 +17,8 @@ from db.repository import (
     get_task_by_id, 
     log_task_click,
     get_last_active_task,  
-    get_oldest_pending_task
+    get_oldest_pending_task,
+    get_active_tasks_count
 )
 import asyncio
 from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
@@ -175,27 +176,56 @@ async def handle_accept(query: types.CallbackQuery, callback_data: TaskCB):
     task = await get_task_by_id(callback_data.id)
     await update_task_status(callback_data.id, "active")
     
+    # Редактируем сообщение в топике оператора
     await query.message.edit_text(
-        f"{query.message.text}\n\n🟢 <b>В работе</b>",
+        f"🟢 <b>Задача #{callback_data.id} в работе</b>\nПринята: {datetime.now().strftime('%H:%M:%S')}",
         reply_markup=BotService.get_task_keyboard(callback_data.id, "active", task['form_url']),
         parse_mode="HTML"
     )
-    await query.answer("Задача принята в работу!")
+    await query.answer("Успешно принято!")
 
 # 2. Нажатие "Пауза"
 @dp.callback_query(TaskCB.filter(F.action == "pause"))
 async def handle_pause(query: types.CallbackQuery, callback_data: TaskCB):
     await update_task_status(callback_data.id, "paused")
-    await query.message.edit_reply_markup(reply_markup=BotService.get_task_keyboard(callback_data.id, "paused"))
-    await query.answer("Задача на паузе. Вы свободны для новых задач.")
+    
+    await query.message.edit_text(
+        f"🟡 <b>Задача #{callback_data.id} на паузе</b>\nВы свободны для других задач.",
+        reply_markup=BotService.get_task_keyboard(callback_data.id, "paused"),
+        parse_mode="HTML"
+    )
+    await query.answer("Пауза активирована")
 
-# 3. Нажатие "Завершить" (Запрос ссылки)
+# 3. Нажатие "Продолжить" (Resume) - ЭТОГО НЕ ХВАТАЛО
+@dp.callback_query(TaskCB.filter(F.action == "resume"))
+async def handle_resume(query: types.CallbackQuery, callback_data: TaskCB):
+    # Проверяем, не занят ли оператор другой задачей
+    active_count = await get_active_tasks_count(query.from_user.id)
+    if active_count > 0:
+        await query.answer("❌ Вы не можете продолжить, пока у вас есть другая активная задача!", show_alert=True)
+        return
+
+    task = await get_task_by_id(callback_data.id)
+    await update_task_status(callback_data.id, "active")
+    
+    await query.message.edit_text(
+        f"🟢 <b>Задача #{callback_data.id} снова в работе</b>",
+        reply_markup=BotService.get_task_keyboard(callback_data.id, "active", task['form_url']),
+        parse_mode="HTML"
+    )
+    await query.answer("Продолжаем работу")
+
+# 4. Нажатие "Завершить"
 @dp.callback_query(TaskCB.filter(F.action == "complete"))
 async def handle_complete_request(query: types.CallbackQuery, callback_data: TaskCB):
-    await query.message.answer(f"🏁 Для завершения задачи #{callback_data.id} пришлите ссылку на блокчейн транзакцию.")
+    # Сообщение отправляется в тот же топик оператора
+    await query.message.answer(
+        f"🏁 Чтобы завершить задачу #{callback_data.id}, отправьте ссылку на транзакцию в этот топик.",
+        reply_markup=types.ForceReply(selective=True)
+    )
     await query.answer()
 
-# 4. Обработка входящей ссылки и сверка суммы
+# 5. Обработка входящей ссылки и сверка суммы
 @dp.message(F.text.contains("hash") | F.text.contains("tx") | F.text.contains("tronscan"))
 async def verify_transaction(message: types.Message):
     # ТУТ ВАШ ПАРСЕР (имитация)

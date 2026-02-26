@@ -41,15 +41,16 @@ async def log_task_click(task_id, clicked_at):
             return None
         
 async def get_active_tasks_count(operator_id):
-    """Считает задачи в статусе 'active' для оператора"""
+    """Считает количество задач в статусе 'active' для конкретного оператора"""
     async with db.pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT COUNT(*) FROM task_logs WHERE operator_id = %s AND status = 'active'", 
-                (operator_id,)
+                (str(operator_id),)
             )
             res = await cur.fetchone()
-            return res[0]
+            # Возвращаем первый элемент кортежа (результат COUNT)
+            return res[0] if res else 0
 
 async def update_task_status(task_id, status, blockchain_url=None):
     async with db.pool.acquire() as conn:
@@ -93,3 +94,12 @@ async def get_oldest_pending_task():
             query = "SELECT * FROM task_logs WHERE status = 'pending' ORDER BY assigned_at ASC LIMIT 1"
             await cur.execute(query)
             return await cur.fetchone()
+
+async def update_operator_thread(task_id, thread_id):
+    """Сохраняет ID созданного топика оператора"""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE task_logs SET operator_thread_id = %s WHERE id = %s",
+                (thread_id, task_id)
+            )
