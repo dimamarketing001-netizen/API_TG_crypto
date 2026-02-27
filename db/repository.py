@@ -1,5 +1,6 @@
 import aiomysql
 from db.session import db
+import datetime
 
 async def get_online_operators():
     """Возвращает список онлайн операторов в виде списка словарей"""
@@ -103,3 +104,13 @@ async def update_operator_thread(task_id, thread_id):
                 "UPDATE task_logs SET operator_thread_id = %s WHERE id = %s",
                 (thread_id, task_id)
             )
+
+async def log_task_event(task_id: int, event_type: str):
+    """Записывает событие (пауза, продолжение и т.д.) в историю"""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            query = """
+                INSERT INTO task_events (task_id, event_type, event_time)
+                VALUES (%s, %s, %s)
+            """
+            await cur.execute(query, (task_id, event_type, datetime.now()))

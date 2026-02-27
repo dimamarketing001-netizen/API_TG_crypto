@@ -18,7 +18,8 @@ from db.repository import (
     log_task_click,
     get_last_active_task,  
     get_oldest_pending_task,
-    get_active_tasks_count
+    get_active_tasks_count,
+    log_task_event
 )
 import asyncio
 from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
@@ -170,13 +171,16 @@ async def track_op_click(task_id: int):
         return RedirectResponse(url=original_form_url)
     
     return {"status": "error", "message": "Task not found"}
+
 # 1. Нажатие "Принять и перейти"
 @dp.callback_query(TaskCB.filter(F.action == "accept"))
 async def handle_accept(query: types.CallbackQuery, callback_data: TaskCB):
     task = await get_task_by_id(callback_data.id)
     await update_task_status(callback_data.id, "active")
     
-    # Редактируем сообщение в топике оператора
+    # ФИКСИРУЕМ ПРИНЯТИЕ
+    await log_task_event(callback_data.id, 'accept')
+    
     await query.message.edit_text(
         f"🟢 <b>Задача #{callback_data.id} в работе</b>\nПринята: {datetime.now().strftime('%H:%M:%S')}",
         reply_markup=BotService.get_task_keyboard(callback_data.id, "active", task['form_url']),
@@ -189,6 +193,9 @@ async def handle_accept(query: types.CallbackQuery, callback_data: TaskCB):
 async def handle_pause(query: types.CallbackQuery, callback_data: TaskCB):
     await update_task_status(callback_data.id, "paused")
     
+    # ФИКСИРУЕМ ПАУЗУ
+    await log_task_event(callback_data.id, 'pause')
+    
     await query.message.edit_text(
         f"🟡 <b>Задача #{callback_data.id} на паузе</b>\nВы свободны для других задач.",
         reply_markup=BotService.get_task_keyboard(callback_data.id, "paused"),
@@ -196,17 +203,19 @@ async def handle_pause(query: types.CallbackQuery, callback_data: TaskCB):
     )
     await query.answer("Пауза активирована")
 
-# 3. Нажатие "Продолжить" (Resume) - ЭТОГО НЕ ХВАТАЛО
+# 3. Нажатие "Продолжить"
 @dp.callback_query(TaskCB.filter(F.action == "resume"))
 async def handle_resume(query: types.CallbackQuery, callback_data: TaskCB):
-    # Проверяем, не занят ли оператор другой задачей
     active_count = await get_active_tasks_count(query.from_user.id)
     if active_count > 0:
-        await query.answer("❌ Вы не можете продолжить, пока у вас есть другая активная задача!", show_alert=True)
+        await query.answer("❌ Сначала завершите текущую активную задачу!", show_alert=True)
         return
 
     task = await get_task_by_id(callback_data.id)
     await update_task_status(callback_data.id, "active")
+    
+    # ФИКСИРУЕМ ПРОДОЛЖЕНИЕ
+    await log_task_event(callback_data.id, 'resume')
     
     await query.message.edit_text(
         f"🟢 <b>Задача #{callback_data.id} снова в работе</b>",
@@ -236,6 +245,7 @@ async def verify_transaction(message: types.Message):
     if task and float(found_amount) == float(task['expected_amount']):
         # 1. Завершаем текущую задачу
         await update_task_status(task['id'], "completed")
+        await log_task_event(task['id'], 'complete')
         await message.answer("✅ Сумма совпала! Задача завершена.")
         
         # 2. ПРОВЕРКА ОЧЕРЕДИ: Есть ли ожидающие задачи?
