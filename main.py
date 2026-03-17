@@ -63,8 +63,6 @@ async def update_status(data: StatusUpdateData):
     if data.status == "calc_requested":
         op_tag = await BotService.assign_operator_and_notify(data)
         msg = f"📩 <b>Запросили расчет</b>\n\n👨‍💻 <b>Оператор:</b> {op_tag}"
-        if data.link:
-            msg += f"\n🔗 <a href='{data.link}'>Ссылка на расчет</a>"
 
     await bot.send_message(
         chat_id=data.chat_id, 
