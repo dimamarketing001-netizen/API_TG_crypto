@@ -19,7 +19,8 @@ from db.repository import (
     get_last_active_task,  
     get_oldest_pending_task,
     get_active_tasks_count,
-    log_task_event
+    log_task_event,
+    assign_task_to_operator
 )
 import asyncio
 from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
@@ -272,11 +273,21 @@ async def verify_transaction(message: types.Message):
         await log_task_event(task['id'], 'complete')
         await message.answer(reply_text + "\n✅ <b>Сумма совпала! Задача завершена.</b>", parse_mode="HTML")
         
-        # Логика очереди (как у вас была)
+        # Логика очереди
         pending_task = await get_oldest_pending_task()
         if pending_task:
-            await update_task_status(pending_task['id'], "pending")
-            # ... (ваша логика уведомления следующего оператора)
+            op_id = str(message.from_user.id)
+            op_group = OPERATORS_TO_GROUPS.get(op_id)
+            
+            if op_group:
+                # 1. Привязываем задачу к оператору
+                await assign_task_to_operator(pending_task['id'], op_id)
+                # 2. Вызываем тот же самый метод создания топика
+                await BotService.create_operator_topic(
+                    pending_task['id'], 
+                    op_group, 
+                    pending_task['message_thread_id']
+                )
     else:
         await message.answer(reply_text + "\n❌ <b>Сумма не совпала!</b>", parse_mode="HTML")
 

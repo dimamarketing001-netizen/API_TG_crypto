@@ -3,7 +3,7 @@ import httpx
 from aiogram import Bot
 from core.config import settings
 from core.constants import CITIES_TO_GROUPS, OPERATORS_TO_GROUPS
-from db.repository import get_online_operators, create_task_log
+from db.repository import get_online_operators, create_task_log, update_operator_thread
 from services.operator_logic import balancer 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
@@ -18,6 +18,22 @@ class TaskCB(CallbackData, prefix="task"):
     id: int
 
 class BotService:
+    @staticmethod
+    async def send_task_to_operator(task_id, op_group):
+        from db.repository import update_operator_thread
+        # Создаем топик
+        new_op_topic = await bot.create_forum_topic(chat_id=op_group, name=f"Задача #{task_id}")
+        # Сохраняем ID топика в БД
+        await update_operator_thread(task_id, new_op_topic.message_thread_id)
+        # Отправляем сообщение
+        await bot.send_message(
+            chat_id=op_group,
+            message_thread_id=new_op_topic.message_thread_id,
+            text=f"📥 <b>Новая задача!</b>",
+            reply_markup=BotService.get_task_keyboard(task_id, "pending"),
+            parse_mode="HTML"
+        )
+
     @staticmethod
     def format_main_message(data, city_name: str, partner_name: str) -> str:
         """Текст сообщения для нового топика (из исходника)"""
@@ -91,44 +107,39 @@ class BotService:
             kb.append([InlineKeyboardButton(text="▶️ Продолжить", callback_data=TaskCB(action="resume", id=task_id).pack())])
         
         return InlineKeyboardMarkup(inline_keyboard=kb)
+    
+
+    @staticmethod
+    async def create_operator_topic(task_id, op_group, thread_id_original):
+        """Создает топик для оператора и шлет туда кнопку 'Принять'"""
+        topic_name = f"Заявка #{task_id} | Топик {thread_id_original}"
+        new_op_topic = await bot.create_forum_topic(chat_id=op_group, name=topic_name)
+        
+        # Сохраняем ID созданного топика в БД
+        await update_operator_thread(task_id, new_op_topic.message_thread_id)
+
+        await bot.send_message(
+            chat_id=op_group,
+            message_thread_id=new_op_topic.message_thread_id,
+            text=f"🆕 <b>Новая задача на расчет!</b>\nПоставлена: {datetime.now().strftime('%H:%M:%S')}",
+            reply_markup=BotService.get_task_keyboard(task_id, "pending"),
+            parse_mode="HTML"
+        )
+        return new_op_topic.message_thread_id
 
     @staticmethod
     async def assign_operator_and_notify(data):
-        from db.repository import create_task_log, update_operator_thread # Локальный импорт
-        
         target_op = await balancer.get_available_operator()
-        assigned_time = datetime.now()
-        
         if not target_op:
-            await create_task_log("queue", str(data.chat_id), data.message_thread_id, data.link, assigned_time)
+            await create_task_log("queue", str(data.chat_id), data.message_thread_id, data.link, datetime.now())
             return "⏳ В очереди (все заняты)"
 
         op_id = str(target_op['personal_telegram_id'])
-        op_user = target_op['personal_telegram_username']
         op_group = OPERATORS_TO_GROUPS.get(op_id)
-
-        task_id = await create_task_log(op_id, str(data.chat_id), data.message_thread_id, data.link, assigned_time)
+        task_id = await create_task_log(op_id, str(data.chat_id), data.message_thread_id, data.link, datetime.now())
 
         if op_group:
-            try:
-                # 1. СОЗДАЕМ ТЕМУ В ГРУППЕ ОПЕРАТОРА (1 задача = 1 тема)
-                topic_name = f"Заявка #{task_id} | Топик {data.message_thread_id}"
-                new_op_topic = await bot.create_forum_topic(chat_id=op_group, name=topic_name)
-                
-                # Сохраняем ID этой темы в БД
-                await update_operator_thread(task_id, new_op_topic.message_thread_id)
-
-                # 2. ШЛЕМ СООБЩЕНИЕ В ЭТУ ТЕМУ
-                await bot.send_message(
-                    chat_id=op_group,
-                    message_thread_id=new_op_topic.message_thread_id,
-                    text=f"🆕 <b>Новая задача на расчет!</b>\nПоставлена: {assigned_time.strftime('%H:%M:%S')}",
-                    reply_markup=BotService.get_task_keyboard(task_id, "pending"),
-                    parse_mode="HTML"
-                )
-                return f"@{op_user}"
-            except Exception as e:
-                logging.error(f"Ошибка создания темы для оператора {op_id}: {e}")
-                return f"@{op_user} (ошибка создания темы)"
+            await BotService.create_operator_topic(task_id, op_group, data.message_thread_id)
+            return f"@{target_op['personal_telegram_username']}"
         
-        return f"@{op_user} (группа не настроена)"
+        return "Ошибка: группа не настроена"
