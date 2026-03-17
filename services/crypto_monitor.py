@@ -88,7 +88,7 @@ class CryptoMonitor:
         import urllib.parse
         
         url = f"https://tonapi.io/v2/events/{urllib.parse.quote(tx_hash)}"
-        print(f"  [LOG] Проверка в TON...")
+        print(f"  [LOG] TON...")
         
         try:
             res = requests.get(url, headers=self.headers, timeout=15)
