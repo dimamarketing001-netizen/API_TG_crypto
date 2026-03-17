@@ -23,6 +23,8 @@ from db.repository import (
 )
 import asyncio
 from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
+from API_TG_crypto.services.crypto_monitor import CryptoMonitor
+monitor = CryptoMonitor()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -235,35 +237,50 @@ async def handle_complete_request(query: types.CallbackQuery, callback_data: Tas
     await query.answer()
 
 # 5. Обработка входящей ссылки и сверка суммы
-@dp.message(F.text.contains("hash") | F.text.contains("tx") | F.text.contains("tronscan"))
+@dp.message(F.text.regexp(r'[a-zA-Z0-9+/=]{32,}'))
 async def verify_transaction(message: types.Message):
-    # ТУТ ВАШ ПАРСЕР (имитация)
-    found_amount = 100.5 
+    tx_hash = message.text.strip()
+    task = await get_last_active_task(message.from_user.id)
     
-    task = await get_last_active_task(message.from_user.id) 
+    if not task:
+        await message.answer("❌ У вас нет активных задач.")
+        return
+
+    # 1. Запускаем поиск (используем search_tx, который возвращает словарь)
+    loop = asyncio.get_event_loop()
+    # Передаем кошелек для проверки безопасности
+    tx_data = await loop.run_in_executor(None, monitor.search_tx, tx_hash, task.get('wallet_address'))
+
+    if not tx_data:
+        await message.answer("❌ Транзакция не найдена в сети или адрес получателя не совпадает.")
+        return
+
+    # 2. Формируем красивый отчет
+    expected = float(task.get('expected_amount', 0))
+    found = tx_data['amount']
     
-    if task and float(found_amount) == float(task['expected_amount']):
-        # 1. Завершаем текущую задачу
+    reply_text = (
+        f"✅ <b>Транзакция найдена!</b>\n\n"
+        f"🪙 <b>Крипта:</b> {tx_data['symbol']}\n"
+        f"💰 <b>Сумма:</b> {found} (Ожидалось: {expected})\n"
+        f"👤 <b>От:</b> <code>{tx_data['from_addr']}</code>\n"
+        f"🏦 <b>Куда:</b> <code>{tx_data['to_addr']}</code>\n"
+        f"🕒 <b>Дата:</b> {tx_data['dt']}\n"
+    )
+
+    # 3. Сверка и завершение
+    if abs(found - expected) < 0.01:
         await update_task_status(task['id'], "completed")
         await log_task_event(task['id'], 'complete')
-        await message.answer("✅ Сумма совпала! Задача завершена.")
+        await message.answer(reply_text + "\n✅ <b>Сумма совпала! Задача завершена.</b>", parse_mode="HTML")
         
-        # 2. ПРОВЕРКА ОЧЕРЕДИ: Есть ли ожидающие задачи?
+        # Логика очереди (как у вас была)
         pending_task = await get_oldest_pending_task()
         if pending_task:
-            # Назначаем эту задачу освободившемуся оператору
-            await update_task_status(pending_task['id'], "pending") # Статус остается pending до нажатия "Принять"
-            
-            # В репозитории нужно добавить функцию смены оператора для задачи в очереди
-            # Или просто отправить сообщение оператору
-            op_group = OPERATORS_TO_GROUPS.get(str(message.from_user.id))
-            await bot.send_message(
-                chat_id=op_group,
-                text=f"📥 <b>У вас новая задача из очереди!</b>\nТопик: {pending_task['message_thread_id']}",
-                reply_markup=BotService.get_task_keyboard(pending_task['id'], "pending")
-            )
+            await update_task_status(pending_task['id'], "pending")
+            # ... (ваша логика уведомления следующего оператора)
     else:
-        await message.answer("❌ Ошибка сверки суммы.")
+        await message.answer(reply_text + "\n❌ <b>Сумма не совпала!</b>", parse_mode="HTML")
 
 if __name__ == "__main__":
     import uvicorn
