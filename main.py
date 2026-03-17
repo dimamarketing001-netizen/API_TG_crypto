@@ -24,7 +24,7 @@ from db.repository import (
 )
 import asyncio
 from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
-from API_TG_crypto.services.crypto_monitor import CryptoMonitor
+from services.crypto_monitor import CryptoMonitor
 monitor = CryptoMonitor()
 
 logging.basicConfig(level=logging.INFO)
