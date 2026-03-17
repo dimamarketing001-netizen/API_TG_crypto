@@ -1,6 +1,6 @@
 import aiomysql
 from db.session import db
-import datetime
+from datetime import datetime
 
 async def assign_task_to_operator(task_id, operator_id):
     async with db.pool.acquire() as conn:
@@ -9,7 +9,7 @@ async def assign_task_to_operator(task_id, operator_id):
                 "UPDATE task_logs SET operator_id = %s WHERE id = %s",
                 (str(operator_id), task_id)
             )
-            
+
 async def get_online_operators():
     """Возвращает список онлайн операторов в виде списка словарей"""
     async with db.pool.acquire() as conn:
