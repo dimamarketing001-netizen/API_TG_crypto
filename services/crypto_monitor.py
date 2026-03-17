@@ -17,8 +17,6 @@ class CryptoMonitor:
         tx_hash = tx_hash.strip()
         clean_hash_lower = tx_hash.lower()
         
-        print(f"\n🔍 Запуск анализа хеша: {tx_hash}")
-
         # 1. Сначала пробуем EVM сети (они начинаются на 0x)
         if tx_hash.startswith("0x"):
             res = (
@@ -53,7 +51,7 @@ class CryptoMonitor:
         }
 
     def print_success(self, chain, symbol, amount, from_addr, to_addr, dt):
-        print("\n" + "✅" * 10 + f" НАЙДЕНО В {chain.upper()} " + "✅" * 10)
+        print("\n" + "" * 10 + f" НАЙДЕНО В {chain.upper()} " + "" * 10)
         print(f"КРИПТА:   {symbol}")
         print(f"СУММА:    {amount}")
         print(f"ОТКУДА:   {from_addr}")
