@@ -50,15 +50,6 @@ class CryptoMonitor:
             "dt": str(dt)
         }
 
-    def print_success(self, chain, symbol, amount, from_addr, to_addr, dt):
-        print("\n" + "" * 10 + f" НАЙДЕНО В {chain.upper()} " + "" * 10)
-        print(f"КРИПТА:   {symbol}")
-        print(f"СУММА:    {amount}")
-        print(f"ОТКУДА:   {from_addr}")
-        print(f"КУДА:     {to_addr}")
-        print(f"ДАТА:     {dt}")
-        print("=" * 45)
-
     def raw_to_friendly(self, raw_addr):
         """Конвертирует адрес из 0:abc в формат UQ... (Non-bounceable)"""
         if not raw_addr or ":" not in raw_addr:
@@ -141,7 +132,6 @@ class CryptoMonitor:
 
             return None
         except Exception as e:
-            print(f"  [LOG] TON Error: {e}")
             return None
 
     def check_doge(self, tx_hash, target_wallet=None):
@@ -192,12 +182,10 @@ class CryptoMonitor:
                 dt=dt
             )
         except Exception as e:
-            print(f"  [LOG] DOGE Error: {e}")
             return None
 
     def check_eth_erc20(self, tx_hash, target_wallet=None):
         """Парсинг Ethereum и ERC-20, возвращает словарь с данными или None"""
-        print(f"  [LOG] Проверка в ETH/ERC-20...")
         
         # 1. Пробуем Ethplorer (лучше всего для токенов)
         url_ethplorer = f"https://api.ethplorer.io/getTxInfo/{tx_hash}?apiKey=freekey"
@@ -230,7 +218,7 @@ class CryptoMonitor:
                 
                 return self._format_result(symbol, amount, from_addr, to_addr, dt)
         except Exception as e:
-            print(f"  [LOG] Ethplorer Error: {e}")
+            print(f"  [LOG] Ethplorer Error")
 
         # 2. Резерв: Пробуем Blockchair
         url_bc = f"https://api.blockchair.com/ethereum/dashboards/transaction/{tx_hash}"
@@ -253,7 +241,7 @@ class CryptoMonitor:
                     dt=tx.get("time")
                 )
         except Exception as e:
-            print(f"  [LOG] Blockchair ETH Error: {e}")
+            print(f"  [LOG] Blockchair ETH Error:")
             
         return None
 
@@ -305,12 +293,10 @@ class CryptoMonitor:
                 dt=dt
             )
         except Exception as e:
-            print(f"  [LOG] EVM {network} Error: {e}")
             return None
 
     def check_base(self, tx_hash, target_wallet=None):
         """Парсинг сети BASE через Blockchair, возвращает словарь с данными или None"""
-        print(f"  [LOG] Проверка в BASE...")
         url = f"https://api.blockchair.com/base/dashboards/transaction/{tx_hash}"
         
         try:
@@ -357,7 +343,6 @@ class CryptoMonitor:
                 dt=dt
             )
         except Exception as e:
-            print(f"  [LOG] BASE Error: {e}")
             return None
 
     def check_bsc(self, tx_hash, target_wallet=None):
@@ -407,7 +392,6 @@ class CryptoMonitor:
                 dt=dt
             )
         except Exception as e:
-            print(f"  [LOG] BSC Error: {e}")
             return None
 
     def check_xmr(self, tx_hash, target_wallet=None):
@@ -417,8 +401,6 @@ class CryptoMonitor:
         """
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        print(f"  [LOG] Проверка в Monero (XMR)...")
         
         # Список доступных API для Monero
         providers = [
@@ -452,7 +434,6 @@ class CryptoMonitor:
                             dt=dt
                         )
             except Exception as e:
-                print(f"  [LOG] XMR {api['name']} error: {e}")
                 continue
 
         return None
@@ -511,7 +492,6 @@ class CryptoMonitor:
                 dt=dt
             )
         except Exception as e:
-            print(f"  [LOG] TRON Error: {e}")
             return None
 
     def check_bitcoin(self, tx_hash, target_wallet=None):
@@ -553,5 +533,4 @@ class CryptoMonitor:
                 dt=dt
             )
         except Exception as e:
-            print(f"  [LOG] Bitcoin Error: {e}")
             return None
