@@ -169,14 +169,14 @@ async def create_deal_from_topic(data, chat_id, topic_id) -> int | None:
 
             query = """
                 INSERT INTO CryptoDeals (
-                    brand, type, direction, datetime_meeting, creator_user_id,
+                    type, direction, datetime_meeting, creator_user_id,
                     last_name, first_name, patronymic,
                     amount_to_get, currency_to_get, amount_to_give, currency_to_give,
                     form_url, topic_id, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             params = (
-                data.brand_id, data.transaction_type, data.transaction_type, data.visit_time, data.creator_id,
+                data.transaction_type, data.transaction_type, data.visit_time, data.creator_id,
                 last_name, first_name, patronymic,
                 amount_to_get, currency_to_get, amount_to_give, currency_to_give,
                 data.form_url, topic_id, 'new'  # Начальный статус
