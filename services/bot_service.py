@@ -5,7 +5,8 @@ from core.config import settings
 from core.constants import CITIES_TO_GROUPS, OPERATORS_TO_GROUPS
 from db.repository import get_online_operators, create_task_log, update_operator_thread
 from services.operator_logic import balancer 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, InlineKeyboardBuilder
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime
 from aiogram.filters.callback_data import CallbackData
 import logging
