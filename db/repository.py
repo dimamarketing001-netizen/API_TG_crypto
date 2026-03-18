@@ -149,37 +149,18 @@ async def create_deal_from_topic(data, chat_id, topic_id) -> int | None:
     """Создает запись в CryptoDeals и возвращает ID."""
     async with db.pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Определяем суммы в зависимости от типа транзакции
-            if data.transaction_type == 'direct':
-                amount_to_give = data.cash_amount
-                currency_to_give = data.cash_currency
-                amount_to_get = data.wallet_amount
-                currency_to_get = data.wallet_currency
-            else:  # reverse
-                amount_to_give = data.wallet_amount
-                currency_to_give = data.wallet_currency
-                amount_to_get = data.cash_amount
-                currency_to_get = data.cash_currency
-
-            # Простой парсинг ФИО
-            name_parts = str(data.client_full_name).split()
-            last_name = name_parts[0] if len(name_parts) > 0 else None
-            first_name = name_parts[1] if len(name_parts) > 1 else None
-            patronymic = ' '.join(name_parts[2:]) if len(name_parts) > 2 else None
-
+            # Минимально рабочий запрос, чтобы избежать ошибок с неизвестными колонками.
+            # Сохраняет только ID топика, ФИО клиента и ссылку на форму.
             query = """
                 INSERT INTO CryptoDeals (
-                    type, direction, datetime_meeting, creator_user_id,
-                    last_name, first_name, patronymic,
-                    amount_to_get, currency_to_get, amount_to_give, currency_to_give,
-                    form_url, topic_id, status
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    topic_id, client_full_name, form_url, status
+                ) VALUES (%s, %s, %s, %s)
             """
             params = (
-                data.transaction_type, data.transaction_type, data.visit_time, data.creator_id,
-                last_name, first_name, patronymic,
-                amount_to_get, currency_to_get, amount_to_give, currency_to_give,
-                data.form_url, topic_id, 'new'  # Начальный статус
+                topic_id,
+                data.client_full_name,
+                data.form_url,
+                'new'  # Начальный статус
             )
             await cur.execute(query, params)
             return cur.lastrowid
