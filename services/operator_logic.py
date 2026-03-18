@@ -1,5 +1,5 @@
 import asyncio
-from db.repository import get_online_operators, get_active_tasks_count, get_oldest_pending_task
+from db.repository import get_online_operators, get_active_tasks_count, get_oldest_pending_task, get_online_security_officers, get_active_security_tasks_count
 
 class TaskBalancer:
     def __init__(self):
@@ -21,4 +21,23 @@ class TaskBalancer:
             
             return None # Все заняты
 
+class SecurityTaskBalancer:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+
+    async def get_available_security_officer(self):
+        """Находит сотрудника СБ, который онлайн и у которого 0 активных задач."""
+        async with self.lock:
+            online_officers = await get_online_security_officers()
+            if not online_officers:
+                return None
+
+            for officer in online_officers:
+                officer_id = str(officer['id'])
+                active_count = await get_active_security_tasks_count(officer_id)
+                if active_count == 0:
+                    return officer
+            return None
+
 balancer = TaskBalancer()
+security_balancer = SecurityTaskBalancer()

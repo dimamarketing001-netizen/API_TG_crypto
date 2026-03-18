@@ -21,12 +21,12 @@ from db.repository import (
     get_oldest_pending_task,
     get_active_tasks_count,
     log_task_event,
-    assign_task_to_operator
+    assign_task_to_operator,
     find_or_create_security_topic,
     create_security_task
 )
 import asyncio
-from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
+from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS, SECURITY_TO_GROUPS
 from services.crypto_monitor import CryptoMonitor
 from services.operator_logic import security_balancer
 
@@ -239,13 +239,41 @@ async def handle_deal_escalation(query: types.CallbackQuery, callback_data: Deal
         await query.answer("Заявка не найдена!", show_alert=True)
         return
 
-    # Здесь будет ваша логика создания задачи для СБ.
-    # Для примера, я просто обновлю сообщение и уведомлю в чате.
-    # TODO: Реализовать полную логику с security_balancer, созданием темы и т.д.
+    # 1. Находим свободного сотрудника СБ
+    security_officer = await security_balancer.get_available_security_officer()
+    if not security_officer:
+        await query.answer("Все сотрудники СБ заняты, попробуйте позже.", show_alert=True)
+        return
+
+    # 2. Находим или создаем тему для клиента в чате СБ
+    security_group_id = SECURITY_TO_GROUPS.get(str(security_officer['personal_telegram_id']))
+    if not security_group_id:
+        await query.answer("Не настроена группа для сотрудника СБ.", show_alert=True)
+        return
+
+    # В таблице CryptoDeals должен быть client_id, связанный с клиентом.
+    # Если его нет, можно использовать client_full_name или другой уникальный идентификатор.
+    client_identifier = deal.get('client_id') or deal.get('client_full_name')
+    if not client_identifier:
+        await query.answer("Не удалось идентифицировать клиента для создания темы СБ.", show_alert=True)
+        return
+
+    topic_id = await find_or_create_security_topic(client_identifier, security_group_id, security_officer['id'])
+
+    # 3. Создаем задачу для СБ (связываем с deal_id)
+    security_task_id = await create_security_task(deal['deals_id'], security_officer['id'], topic_id, is_deal_task=True)
+
+    # 4. Отправляем уведомление в тему СБ
+    sb_message = (f"🚨 <b>Новая задача от менеджера #{security_task_id}!</b>\n\n"
+                  f"<b>Действие:</b> {action_verb}\n"
+                  f"<b>Менеджер:</b> @{query.from_user.username}\n"
+                  f"<b>Клиент:</b> {deal.get('client_full_name', 'N/A')}")
+    await bot.send_message(security_group_id, message_thread_id=topic_id, text=sb_message, parse_mode="HTML")
+
     await query.message.edit_text(f"{query.message.text}\n\n---\n"
-                                  f"❗️ Заявка была **{action_text.upper()}** менеджером @{query.from_user.username}.\n"
+                                  f"❗️ Заявка была <b>{action_text.upper()}</b> менеджером @{query.from_user.username}.\n"
                                   f"Задача передана в Службу Безопасности.", parse_mode="HTML")
-    await query.answer(f"Заявка {action_text} и передана в СБ.")
+    await query.answer(f"Заявка {action_text} и передана в СБ")
 
 # Новые обработчики для кнопок "Перенести" и "Отклонить"
 @dp.callback_query(TaskCB.filter(F.action.in_({"transfer", "reject"})))
@@ -275,7 +303,7 @@ async def handle_escalation(query: types.CallbackQuery, callback_data: TaskCB):
     client_id = task.get('client_id', 0) 
     topic_id = await find_or_create_security_topic(client_id, security_group_id, security_officer['id'])
 
-    # 4. Создаем задачу для СБ
+    # 4. Создаем задачу для СБ (связываем с task_id)
     security_task_id = await create_security_task(task['id'], security_officer['id'], topic_id)
 
     # 5. Отправляем уведомление в тему СБ

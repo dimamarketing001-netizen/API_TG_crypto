@@ -84,6 +84,60 @@ async def get_task_by_id(task_id):
             await cur.execute("SELECT * FROM task_logs WHERE id = %s", (task_id,))
             return await cur.fetchone()
 
+async def get_online_security_officers():
+    """Возвращает список онлайн сотрудников СБ."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            query = """
+                SELECT id, personal_telegram_id, personal_telegram_username 
+                FROM employees 
+                WHERE status = 'online' AND role = 'Security'
+            """
+            await cur.execute(query)
+            return await cur.fetchall()
+
+async def get_active_security_tasks_count(officer_id: int):
+    """Считает активные задачи для сотрудника СБ."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM security_tasks WHERE officer_id = %s AND status = 'active'", 
+                (officer_id,)
+            )
+            res = await cur.fetchone()
+            return res[0] if res else 0
+
+async def find_or_create_security_topic(client_identifier, security_group_id: int, officer_id: int) -> int:
+    """Ищет тему для клиента в чате СБ или создает новую."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            # Ищем существующую тему по идентификатору клиента
+            await cur.execute("SELECT topic_id FROM security_topics WHERE client_identifier = %s", (str(client_identifier),))
+            existing = await cur.fetchone()
+            if existing:
+                return existing['topic_id']
+            
+            # Если не нашли, создаем новую
+            from services.bot_service import bot
+            topic = await bot.create_forum_topic(chat_id=security_group_id, name=f"Клиент: {client_identifier}")
+            
+            # Сохраняем в БД
+            await cur.execute(
+                "INSERT INTO security_topics (client_identifier, security_chat_id, officer_id, topic_id) VALUES (%s, %s, %s, %s)",
+                (str(client_identifier), security_group_id, officer_id, topic.message_thread_id)
+            )
+            return topic.message_thread_id
+
+async def create_security_task(original_task_id: int, officer_id: int, topic_id: int, is_deal_task: bool = False) -> int:
+    """Создает задачу в таблице security_tasks."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            # В зависимости от флага, пишем ID в deal_id или в operator_task_id
+            task_id_field = "deal_id" if is_deal_task else "operator_task_id"
+            query = f"INSERT INTO security_tasks ({task_id_field}, officer_id, topic_id) VALUES (%s, %s, %s)"
+            await cur.execute(query, (original_task_id, officer_id, topic_id))
+            return cur.lastrowid
+
 async def get_deal_by_id(deal_id: int):
     """Получает информацию о сделке из таблицы CryptoDeals по ее ID."""
     async with db.pool.acquire() as conn:

@@ -16,6 +16,11 @@ OPERATORS_TO_GROUPS = {
     "582035596": -1003832914431,
 }
 
+SECURITY_TO_GROUPS = {
+    "582035596": -1003725082183
+    # "telegram_id_sb_2": -100... (ID группы СБ 2)
+}
+
 STATUS_MAP = {
     "calc_new": "🆕 Новый расчет",
     "calc_requested": "📩 Запросили расчет",
