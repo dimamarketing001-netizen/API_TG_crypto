@@ -22,7 +22,7 @@ class TaskCB(CallbackData, prefix="task"):
 # Новый CallbackData для кнопок на основной заявке
 class DealCB(CallbackData, prefix="deal"):
     action: str
-    id: int # ID из таблицы CryptoDeals
+    id: str # ID из таблицы CryptoDeals
 
 class BotService:
     @staticmethod

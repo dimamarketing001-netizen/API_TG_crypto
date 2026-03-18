@@ -213,7 +213,7 @@ async def handle_deal_accept(query: types.CallbackQuery, callback_data: DealCB):
     # Создаем объект, похожий на `StatusUpdateData` для переиспользования логики
     fake_data = type('obj', (object,), {
         'chat_id': deal['chat_id'], 
-        'message_thread_id': deal['message_thread_id'],
+        'message_thread_id': deal['topic_id'],
         'link': deal.get('form_url', '#') # Предполагаем, что form_url есть в CryptoDeals
     })
 

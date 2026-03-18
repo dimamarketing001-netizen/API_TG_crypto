@@ -1,4 +1,5 @@
 import aiomysql
+import uuid
 from db.session import db
 from datetime import datetime
 
@@ -138,32 +139,55 @@ async def create_security_task(original_task_id: int, officer_id: int, topic_id:
             await cur.execute(query, (original_task_id, officer_id, topic_id))
             return cur.lastrowid
 
-async def get_deal_by_id(deal_id: int):
+async def get_deal_by_id(deal_id: str):
     """Получает информацию о сделке из таблицы CryptoDeals по ее ID."""
     async with db.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
             await cur.execute("SELECT * FROM CryptoDeals WHERE deals_id = %s", (deal_id,))
             return await cur.fetchone()
 
-async def create_deal_from_topic(data, chat_id, topic_id) -> int | None:
-    """Создает запись в CryptoDeals и возвращает ID."""
+async def create_deal_from_topic(data, chat_id, topic_id) -> str | None:
+    """Создает запись в CryptoDeals и возвращает ее ID."""
     async with db.pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Минимально рабочий запрос, чтобы избежать ошибок с неизвестными колонками.
-            # Сохраняет только ID топика, ФИО клиента и ссылку на форму.
+            deals_id = str(uuid.uuid4())
+
+            # Определяем суммы в зависимости от типа транзакции
+            if data.transaction_type == 'direct':
+                amount_to_give = data.cash_amount
+                currency_to_give = data.cash_currency
+                amount_to_get = data.wallet_amount
+                currency_to_get = data.wallet_currency
+            else:  # reverse
+                amount_to_give = data.wallet_amount
+                currency_to_give = data.wallet_currency
+                amount_to_get = data.cash_amount
+                currency_to_get = data.cash_currency
+
             query = """
                 INSERT INTO CryptoDeals (
-                    topic_id, client_full_name, form_url, status
-                ) VALUES (%s, %s, %s, %s)
+                    deals_id, employee_id, direction,
+                    amount_to_get, currency_to_get, amount_to_give, currency_to_give,
+                    status, datetime_meeting, topic_id, chat_id, client_full_name, form_url
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             params = (
+                deals_id,
+                data.creator_id,
+                data.transaction_type,
+                amount_to_get,
+                currency_to_get,
+                amount_to_give,
+                currency_to_give,
+                'new',  # Начальный статус
+                data.visit_time,
                 topic_id,
+                chat_id,
                 data.client_full_name,
-                data.form_url,
-                'new'  # Начальный статус
+                data.form_url
             )
             await cur.execute(query, params)
-            return cur.lastrowid
+            return deals_id
 
 async def get_last_active_task(operator_id):
     """Находит последнюю активную задачу конкретного оператора"""
