@@ -84,6 +84,25 @@ async def get_task_by_id(task_id):
             await cur.execute("SELECT * FROM task_logs WHERE id = %s", (task_id,))
             return await cur.fetchone()
 
+async def get_deal_by_id(deal_id: int):
+    """Получает информацию о сделке из таблицы CryptoDeals по ее ID."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            await cur.execute("SELECT * FROM CryptoDeals WHERE deals_id = %s", (deal_id,))
+            return await cur.fetchone()
+
+async def create_deal_from_topic(data, chat_id, topic_id) -> int | None:
+    """Создает запись в CryptoDeals и возвращает ID."""
+    # Эта функция-заглушка, ее нужно будет реализовать на основе вашей логики
+    # Примерная реализация:
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            # Здесь должен быть INSERT в вашу таблицу CryptoDeals
+            # Например:
+            query = "INSERT INTO CryptoDeals (chat_id, message_thread_id, client_full_name, form_url) VALUES (%s, %s, %s, %s)"
+            await cur.execute(query, (chat_id, topic_id, data.client_full_name, data.form_url))
+            return cur.lastrowid
+
 async def get_last_active_task(operator_id):
     """Находит последнюю активную задачу конкретного оператора"""
     async with db.pool.acquire() as conn:

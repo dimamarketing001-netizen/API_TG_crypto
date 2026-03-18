@@ -17,6 +17,11 @@ class TaskCB(CallbackData, prefix="task"):
     action: str
     id: int
 
+# Новый CallbackData для кнопок на основной заявке
+class DealCB(CallbackData, prefix="deal"):
+    action: str
+    id: int # ID из таблицы CryptoDeals
+
 class BotService:
     @staticmethod
     async def send_task_to_operator(task_id, op_group):
@@ -82,15 +87,42 @@ class BotService:
         topic_title = f"{type_text} | {amount} | {data.visit_time}"
         
         topic = await bot.create_forum_topic(chat_id=group_id, name=topic_title)
+
+        # --- НОВАЯ ЛОГИКА ---
+        # 1. Создаем запись в БД, чтобы получить ID сделки (deals_id)
+        from db.repository import create_deal_from_topic
+        deals_id = await create_deal_from_topic(data, group_id, topic.message_thread_id)
+        if not deals_id:
+            log.error("Не удалось создать запись в CryptoDeals, ID не получен.")
+            return None
+
+        # 2. Создаем клавиатуру с этим ID
+        deal_keyboard = BotService.get_deal_keyboard(deals_id)
         
         await bot.send_message(
             chat_id=group_id,
             message_thread_id=topic.message_thread_id,
             text=BotService.format_main_message(data, city_name, partner_name),
+            reply_markup=deal_keyboard, # <--- ДОБАВЛЯЕМ КНОПКИ
             parse_mode="HTML",
             disable_web_page_preview=True
         )
         return {"chat_id": group_id, "topic_id": topic.message_thread_id}
+
+    @staticmethod
+    def get_task_keyboard(task_id: int, status: str, form_url: str = "#"):
+        # ... (код этой функции без изменений)
+        pass
+
+    @staticmethod
+    def get_deal_keyboard(deal_id: int):
+        """Создает клавиатуру для основной заявки в городском чате."""
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✅ Принять", callback_data=DealCB(action="accept", id=deal_id).pack())
+        builder.button(text="↪️ Перенести", callback_data=DealCB(action="transfer", id=deal_id).pack())
+        builder.button(text="❌ Отклонить", callback_data=DealCB(action="reject", id=deal_id).pack())
+        builder.adjust(3)
+        return builder.as_markup()
 
     @staticmethod
     def get_task_keyboard(task_id: int, status: str, form_url: str = "#"):

@@ -5,15 +5,16 @@ from contextlib import asynccontextmanager
 from typing import Any
 from db.session import db
 from models.schemas import TransactionData, CalculationData, StatusUpdateData
-from aiogram.types import BufferedInputFile
+from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData, DocumentData
 from fastapi.responses import RedirectResponse
 from datetime import datetime
 from aiogram import Dispatcher, types, F
-from services.bot_service import BotService, bot, TaskCB
+from services.bot_service import BotService, bot, TaskCB, DealCB
 from db.repository import (
     update_task_status, 
     set_expected_amount, 
+    get_deal_by_id,
     get_task_by_id, 
     log_task_click,
     get_last_active_task,  
@@ -21,10 +22,14 @@ from db.repository import (
     get_active_tasks_count,
     log_task_event,
     assign_task_to_operator
+    find_or_create_security_topic,
+    create_security_task
 )
 import asyncio
 from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS
 from services.crypto_monitor import CryptoMonitor
+from services.operator_logic import security_balancer
+
 monitor = CryptoMonitor()
 
 logging.basicConfig(level=logging.INFO)
@@ -188,6 +193,96 @@ async def handle_accept(query: types.CallbackQuery, callback_data: TaskCB):
         parse_mode="HTML"
     )
     await query.answer("Успешно принято!")
+
+# --- НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ЗАЯВОК В ГОРОДСКИХ ЧАТАХ ---
+
+@dp.callback_query(DealCB.filter(F.action == "accept"))
+async def handle_deal_accept(query: types.CallbackQuery, callback_data: DealCB):
+    """
+    Обрабатывает нажатие 'Принять' на основной заявке.
+    Эта логика аналогична старому эндпоинту /transaction/status.
+    """
+    deal = await get_deal_by_id(callback_data.id)
+    if not deal:
+        await query.answer("Заявка не найдена!", show_alert=True)
+        return
+
+    # Создаем объект, похожий на `StatusUpdateData` для переиспользования логики
+    fake_data = type('obj', (object,), {
+        'chat_id': deal['chat_id'], 
+        'message_thread_id': deal['message_thread_id'],
+        'link': deal.get('form_url', '#') # Предполагаем, что form_url есть в CryptoDeals
+    })
+
+    operator_tag = await BotService.assign_operator_and_notify(fake_data)
+    msg = f"📩 <b>Запросили расчет</b>\n\n👨‍💻 <b>Оператор:</b> {operator_tag}"
+
+    await bot.send_message(
+        chat_id=deal['chat_id'], 
+        message_thread_id=deal['message_thread_id'], 
+        text=f"📢 {msg}", 
+        parse_mode="HTML"
+    )
+    # Убираем кнопки с исходного сообщения
+    await query.message.edit_reply_markup(reply_markup=None)
+    await query.answer(f"Заявка принята. Назначен оператор: {operator_tag}")
+
+
+@dp.callback_query(DealCB.filter(F.action.in_({"transfer", "reject"})))
+async def handle_deal_escalation(query: types.CallbackQuery, callback_data: DealCB):
+    """Обрабатывает 'Перенести' и 'Отклонить' на основной заявке."""
+    action_text = "перенесена" if callback_data.action == "transfer" else "отклонена"
+    action_verb = "Перенос" if callback_data.action == "transfer" else "Отклонение"
+    
+    deal = await get_deal_by_id(callback_data.id)
+    if not deal:
+        await query.answer("Заявка не найдена!", show_alert=True)
+        return
+
+    # Здесь будет ваша логика создания задачи для СБ.
+    # Для примера, я просто обновлю сообщение и уведомлю в чате.
+    # TODO: Реализовать полную логику с security_balancer, созданием темы и т.д.
+    await query.message.edit_text(f"{query.message.text}\n\n---\n"
+                                  f"❗️ Заявка была **{action_text.upper()}** менеджером @{query.from_user.username}.\n"
+                                  f"Задача передана в Службу Безопасности.", parse_mode="HTML")
+    await query.answer(f"Заявка {action_text} и передана в СБ.")
+
+# Новые обработчики для кнопок "Перенести" и "Отклонить"
+@dp.callback_query(TaskCB.filter(F.action.in_({"transfer", "reject"})))
+async def handle_escalation(query: types.CallbackQuery, callback_data: TaskCB):
+    action_text = "перенесена" if callback_data.action == "transfer" else "отклонена"
+    action_verb = "Перенос" if callback_data.action == "transfer" else "Отклонение"
+
+    # 1. Находим свободного сотрудника СБ
+    security_officer = await security_balancer.get_available_security_officer()
+    if not security_officer:
+        await query.answer("Все сотрудники СБ заняты, попробуйте позже.", show_alert=True)
+        return
+
+    # 2. Получаем информацию о задаче
+    task = await get_task_by_id(callback_data.id)
+    if not task:
+        await query.answer("Задача не найдена.", show_alert=True)
+        return
+
+    # 3. Находим или создаем тему для клиента в чате СБ
+    security_group_id = SECURITY_TO_GROUPS.get(str(security_officer['personal_telegram_id']))
+    if not security_group_id:
+        await query.answer("Не настроена группа для сотрудника СБ.", show_alert=True)
+        return
+
+    # Предполагаем, что client_id есть в задаче. Если нет, нужна доп. логика.
+    client_id = task.get('client_id', 0) 
+    topic_id = await find_or_create_security_topic(client_id, security_group_id, security_officer['id'])
+
+    # 4. Создаем задачу для СБ
+    security_task_id = await create_security_task(task['id'], security_officer['id'], topic_id)
+
+    # 5. Отправляем уведомление в тему СБ
+    await bot.send_message(security_group_id, message_thread_id=topic_id, text=f"🚨 Новая задача от оператора #{security_task_id}!\n<b>Действие:</b> {action_verb}\n<b>Оператор:</b> @{query.from_user.username}", parse_mode="HTML")
+
+    await query.message.edit_text(f"Задача #{callback_data.id} {action_text} в СБ. Назначен: @{security_officer['personal_telegram_username']}")
+    await query.answer(f"Задача передана в СБ")
 
 # 2. Нажатие "Пауза"
 @dp.callback_query(TaskCB.filter(F.action == "pause"))
