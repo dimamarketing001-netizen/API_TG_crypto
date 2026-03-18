@@ -222,7 +222,7 @@ async def handle_deal_accept(query: types.CallbackQuery, callback_data: DealCB):
 
     await bot.send_message(
         chat_id=deal['chat_id'], 
-        message_thread_id=deal['message_thread_id'], 
+        message_thread_id=deal['topic_id'], 
         text=f"📢 {msg}", 
         parse_mode="HTML"
     )
