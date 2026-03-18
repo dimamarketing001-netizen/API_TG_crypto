@@ -62,6 +62,7 @@ async def create_tx(data: TransactionData):
 
 @app.post("/transaction/status")
 async def update_status(data: StatusUpdateData):
+    logging.info(f"Получен запрос на обновление статуса: {data.model_dump_json(indent=2)}")
     # Берем текст из STATUS_MAP или используем переданный текст
     msg = STATUS_MAP.get(data.status, data.status)
     op_tag = "Система"
@@ -80,6 +81,7 @@ async def update_status(data: StatusUpdateData):
 
 @app.post("/transaction/calculation")
 async def send_calc(data: CalculationData):
+    logging.info(f"Получен запрос на расчет: {data.model_dump_json(indent=2)}")
     amount = float(''.join(filter(lambda x: x.isdigit() or x == '.', str(data.total_to_transfer))))
     await set_expected_amount(data.chat_id, data.message_thread_id, amount)
     
@@ -105,6 +107,7 @@ async def send_calc(data: CalculationData):
 @app.post("/transaction/document")
 async def upload_doc(data: DocumentData):
     """Скачивание PDF по ссылке и отправка в Telegram"""
+    logging.info(f"Получен запрос на загрузку документа: {data.model_dump_json(indent=2)}")
     async with httpx.AsyncClient() as client:
         try:
             # 1. Скачиваем файл

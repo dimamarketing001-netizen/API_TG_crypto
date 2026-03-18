@@ -71,6 +71,7 @@ class BotService:
     @staticmethod
     async def create_transaction_topic(data):
         """Создание топика и отправка первого сообщения"""
+        log.info(f"Получен запрос на создание заявки: {data.model_dump_json(indent=2)}")
         async with httpx.AsyncClient() as client:
             try:
                 resp = await client.get(settings.EXTERNAL_API_URL, timeout=5.0)

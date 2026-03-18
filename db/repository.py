@@ -147,14 +147,41 @@ async def get_deal_by_id(deal_id: int):
 
 async def create_deal_from_topic(data, chat_id, topic_id) -> int | None:
     """Создает запись в CryptoDeals и возвращает ID."""
-    # Эта функция-заглушка, ее нужно будет реализовать на основе вашей логики
-    # Примерная реализация:
     async with db.pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Здесь должен быть INSERT в вашу таблицу CryptoDeals
-            # Например:
-            query = "INSERT INTO CryptoDeals (chat_id, message_thread_id, client_full_name, form_url) VALUES (%s, %s, %s, %s)"
-            await cur.execute(query, (chat_id, topic_id, data.client_full_name, data.form_url))
+            # Определяем суммы в зависимости от типа транзакции
+            if data.transaction_type == 'direct':
+                amount_to_give = data.cash_amount
+                currency_to_give = data.cash_currency
+                amount_to_get = data.wallet_amount
+                currency_to_get = data.wallet_currency
+            else:  # reverse
+                amount_to_give = data.wallet_amount
+                currency_to_give = data.wallet_currency
+                amount_to_get = data.cash_amount
+                currency_to_get = data.cash_currency
+
+            # Простой парсинг ФИО
+            name_parts = str(data.client_full_name).split()
+            last_name = name_parts[0] if len(name_parts) > 0 else None
+            first_name = name_parts[1] if len(name_parts) > 1 else None
+            patronymic = ' '.join(name_parts[2:]) if len(name_parts) > 2 else None
+
+            query = """
+                INSERT INTO CryptoDeals (
+                    brand, type, direction, datetime_meeting, creator_user_id,
+                    last_name, first_name, patronymic,
+                    amount_to_get, currency_to_get, amount_to_give, currency_to_give,
+                    form_url, topic_id, status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            params = (
+                data.brand_id, data.transaction_type, data.transaction_type, data.visit_time, data.creator_id,
+                last_name, first_name, patronymic,
+                amount_to_get, currency_to_get, amount_to_give, currency_to_give,
+                data.form_url, topic_id, 'new'  # Начальный статус
+            )
+            await cur.execute(query, params)
             return cur.lastrowid
 
 async def get_last_active_task(operator_id):
