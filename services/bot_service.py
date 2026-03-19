@@ -121,10 +121,17 @@ class BotService:
     def get_deal_keyboard(deal_id: int):
         """Создает клавиатуру для основной заявки в городском чате."""
         builder = InlineKeyboardBuilder()
-        builder.button(text="✅ Принять", callback_data=DealCB(action="accept", id=deal_id).pack())
-        builder.button(text="↪️ Перенести", callback_data=DealCB(action="transfer", id=deal_id).pack())
-        builder.button(text="❌ Отклонить", callback_data=DealCB(action="reject", id=deal_id).pack())
+        builder.button(text="✅ Принять", callback_data=DealCB(action="accept", id=str(deal_id)).pack())
+        builder.button(text="↪️ Перенести", callback_data=DealCB(action="transfer", id=str(deal_id)).pack())
+        builder.button(text="❌ Отклонить", callback_data=DealCB(action="reject", id=str(deal_id)).pack())
         builder.adjust(3)
+        return builder.as_markup()
+
+    @staticmethod
+    def get_client_arrived_keyboard(deal_id: str):
+        """Создает клавиатуру для кнопки 'Клиент пришел'."""
+        builder = InlineKeyboardBuilder()
+        builder.button(text="Клиент пришел", callback_data=DealCB(action="client_arrived", id=deal_id).pack())
         return builder.as_markup()
 
     @staticmethod
