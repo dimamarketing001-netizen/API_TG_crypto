@@ -203,32 +203,26 @@ async def handle_accept(query: types.CallbackQuery, callback_data: TaskCB):
 async def handle_deal_accept(query: types.CallbackQuery, callback_data: DealCB):
     """
     Обрабатывает нажатие 'Принять' на основной заявке.
-    Эта логика аналогична старому эндпоинту /transaction/status.
+    Просто отправляет сообщение о принятии и убирает кнопки.
     """
     deal = await get_deal_by_id(callback_data.id)
     if not deal:
         await query.answer("Заявка не найдена!", show_alert=True)
         return
 
-    # Создаем объект, похожий на `StatusUpdateData` для переиспользования логики
-    fake_data = type('obj', (object,), {
-        'chat_id': deal['chat_id'], 
-        'message_thread_id': deal['topic_id'],
-        'link': deal.get('form_url', '#') # Предполагаем, что form_url есть в CryptoDeals
-    })
-
-    operator_tag = await BotService.assign_operator_and_notify(fake_data)
-    msg = f"📩 <b>Запросили расчет</b>\n\n👨‍💻 <b>Оператор:</b> {operator_tag}"
+    # Новая логика: простое уведомление
+    msg = "✅ <b>Заявка принята</b>"
 
     await bot.send_message(
-        chat_id=deal['chat_id'], 
-        message_thread_id=deal['topic_id'], 
-        text=f"📢 {msg}", 
+        chat_id=deal['chat_id'],
+        message_thread_id=deal['topic_id'],
+        text=msg,
         parse_mode="HTML"
     )
+    
     # Убираем кнопки с исходного сообщения
     await query.message.edit_reply_markup(reply_markup=None)
-    await query.answer(f"Заявка принята. Назначен оператор: {operator_tag}")
+    await query.answer("Заявка принята!")
 
 
 @dp.callback_query(DealCB.filter(F.action.in_({"transfer", "reject"})))
