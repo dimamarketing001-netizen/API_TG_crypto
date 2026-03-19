@@ -401,8 +401,17 @@ async def handle_security_accept(query: types.CallbackQuery, callback_data: Secu
         f"Необходимо уточнить у СБ и перенести время по сделке.\n\n"
         f"<a href='{topic_link}'>Перейти к заявке</a>"
     )
+
+    # --- НОВАЯ ЛОГИКА ОТПРАВКИ В ТОПИК ---
+    creator_topic_id = deal.get("creator_topic_id")
     
-    await bot.send_message(manager_group_id, text=task_message, parse_mode="HTML")
+    await bot.send_message(
+        chat_id=manager_group_id, 
+        text=task_message, 
+        message_thread_id=creator_topic_id, # Может быть None, и это нормально
+        parse_mode="HTML"
+    )
+    # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
     
     await query.message.edit_text(f"{query.message.text}\n\n---\n✅ Принято СБ. Задача поставлена на ЧМ.")
     await query.answer("Принято. Задача поставлена на ЧМ.")

@@ -199,6 +199,13 @@ async def create_deal_from_topic(data, chat_id, topic_id) -> str | None:
             await cur.execute(query, params)
             return deals_id
 
+async def update_deal_creator_topic(deal_id: str, creator_topic_id: int):
+    """Обновляет ID топика создателя в CryptoDeals."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            query = "UPDATE CryptoDeals SET creator_topic_id = %s WHERE deals_id = %s"
+            await cur.execute(query, (creator_topic_id, deal_id))
+
 async def get_last_active_task(operator_id):
     """Находит последнюю активную задачу конкретного оператора"""
     async with db.pool.acquire() as conn:

@@ -116,6 +116,34 @@ class BotService:
             parse_mode="HTML",
             disable_web_page_preview=True
         )
+
+        # --- УВЕДОМЛЕНИЕ СОЗДАТЕЛЮ ---
+        try:
+            if data.creator_id:
+                from db.repository import get_employee_by_id, update_deal_creator_topic
+                employee = await get_employee_by_id(data.creator_id)
+                if employee and 'work_chat_id' in employee and employee['work_chat_id']:
+                    creator_topic = await bot.create_forum_topic(chat_id=employee['work_chat_id'], name="✅ Заявка создана")
+                    
+                    # Сохраняем ID топика в заявку
+                    await update_deal_creator_topic(deals_id, creator_topic.message_thread_id)
+                    
+                    # Генерируем ссылку на основной топик
+                    # Ссылка вида t.me/c/CHAT_ID/TOPIC_ID, где CHAT_ID это ID группы без -100
+                    chat_id_for_link = str(group_id).replace("-100", "")
+                    topic_link = f"https://t.me/c/{chat_id_for_link}/{topic.message_thread_id}"
+                    
+                    await bot.send_message(
+                        chat_id=employee['work_chat_id'],
+                        message_thread_id=creator_topic.message_thread_id,
+                        text=f"Ваша заявка успешно создана.\n\n<a href='{topic_link}'>Перейти к заявке</a>",
+                        parse_mode="HTML",
+                        disable_web_page_preview=True
+                    )
+        except Exception as e:
+            log.error(f"Ошибка при уведомлении создателя заявки: {e}")
+        # --- КОНЕЦ УВЕДОМЛЕНИЯ ---
+
         return {"chat_id": group_id, "topic_id": topic.message_thread_id}
 
     @staticmethod
