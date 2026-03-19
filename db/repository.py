@@ -237,3 +237,35 @@ async def log_task_event(task_id: int, event_type: str):
                 VALUES (%s, %s, %s)
             """
             await cur.execute(query, (task_id, event_type, datetime.now()))
+
+
+async def get_employee_by_id(employee_id: int):
+    """Возвращает данные сотрудника по его ID из таблицы employees."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            query = "SELECT * FROM employees WHERE id = %s"
+            await cur.execute(query, (employee_id,))
+            return await cur.fetchone()
+
+async def get_online_managers():
+    """Возвращает список онлайн сотрудников с ролью 'Manager'."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor(aiomysql.DictCursor) as cur:
+            query = """
+                SELECT id, personal_telegram_id, personal_telegram_username
+                FROM employees
+                WHERE status = 'online' AND role = 'Manager'
+            """
+            await cur.execute(query)
+            return await cur.fetchall()
+
+async def update_security_task_status(deal_id: int, status: str):
+    """Обновляет статус задачи СБ, связанной с deal_id."""
+    async with db.pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            # Обновляем самую последнюю задачу СБ для данной сделки
+            query = """
+                UPDATE security_tasks SET status = %s
+                WHERE deal_id = %s ORDER BY id DESC LIMIT 1
+            """
+            await cur.execute(query, (status, deal_id))

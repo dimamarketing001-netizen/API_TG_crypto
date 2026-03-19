@@ -1,5 +1,6 @@
 import logging
 import httpx
+import random
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from typing import Any
@@ -9,8 +10,8 @@ from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboar
 from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData, DocumentData
 from fastapi.responses import RedirectResponse
 from datetime import datetime
-from aiogram import Dispatcher, types, F
-from services.bot_service import BotService, bot, TaskCB, DealCB
+from aiogram import Dispatcher, types, F, Bot
+from services.bot_service import BotService, bot, TaskCB, DealCB, SecurityTaskCB
 from db.repository import (
     update_task_status, 
     set_expected_amount, 
@@ -23,10 +24,13 @@ from db.repository import (
     log_task_event,
     assign_task_to_operator,
     find_or_create_security_topic,
-    create_security_task
+    create_security_task,
+    get_employee_by_id,
+    get_online_managers,
+    update_security_task_status,
 )
 import asyncio
-from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS, SECURITY_TO_GROUPS, CITIES_TO_GROUPS
+from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS, SECURITY_TO_GROUPS, CITIES_TO_GROUPS, MANAGERS_TO_GROUPS
 from services.crypto_monitor import CryptoMonitor
 from services.operator_logic import security_balancer
 
@@ -340,12 +344,95 @@ async def handle_deal_escalation(query: types.CallbackQuery, callback_data: Deal
                   f"<b>Сумма:</b> {amount}\n\n"
                   f"<a href='{topic_link}'>Перейти к заявке</a>")
     
-    await bot.send_message(security_group_id, message_thread_id=topic_id, text=sb_message, parse_mode="HTML")
+    await bot.send_message(
+        security_group_id, 
+        message_thread_id=topic_id, 
+        text=sb_message, 
+        parse_mode="HTML",
+        reply_markup=BotService.get_security_task_keyboard(deal['deals_id'])
+    )
 
     await query.message.edit_text(f"{query.message.text}\n\n---\n"
                                   f"❗️ Заявка была <b>{action_text.upper()}</b> менеджером @{query.from_user.username}.\n"
                                   f"Задача передана в Службу Безопасности.", parse_mode="HTML")
     await query.answer(f"Заявка {action_text} и передана в СБ")
+
+
+@dp.callback_query(SecurityTaskCB.filter(F.action == "accept"))
+async def handle_security_accept(query: types.CallbackQuery, callback_data: SecurityTaskCB):
+    """СБ принимает перенос/отмену и ставит задачу на ЧМ"""
+    await update_security_task_status(callback_data.deal_id, "accepted")
+    
+    deal = await get_deal_by_id(callback_data.deal_id)
+    if not deal:
+        await query.answer("Сделка не найдена!", show_alert=True)
+        return
+
+    original_manager_id = deal.get("employee_id")
+    target_manager = None
+    
+    if original_manager_id:
+        manager = await get_employee_by_id(original_manager_id)
+        if manager and manager.get("status") == "online":
+            target_manager = manager
+
+    if not target_manager:
+        online_managers = await get_online_managers()
+        if not online_managers:
+            await query.answer("Не найдено свободных ЧМ онлайн.", show_alert=True)
+            # Тут можно добавить логику постановки в очередь
+            return
+        target_manager = random.choice(online_managers)
+
+    manager_tg_id = target_manager.get("personal_telegram_id")
+    manager_group_id = MANAGERS_TO_GROUPS.get(str(manager_tg_id))
+
+    if not manager_group_id:
+        await query.answer(f"Для менеджера {target_manager.get('personal_telegram_username')} не настроена группа!", show_alert=True)
+        return
+    
+    # Отправляем задачу ЧМу
+    chat_id_for_link = str(deal['chat_id']).replace('-100', '')
+    topic_link = f"https://t.me/c/{chat_id_for_link}/{deal['topic_id']}"
+    task_message = (
+        f"🗓 <b>Задача на перенос/отмену времени по сделке</b>\n\n"
+        f"Сотрудник СБ @{query.from_user.username} подтвердил действие.\n"
+        f"Необходимо уточнить у СБ и перенести время по сделке.\n\n"
+        f"<a href='{topic_link}'>Перейти к заявке</a>"
+    )
+    
+    await bot.send_message(manager_group_id, text=task_message, parse_mode="HTML")
+    
+    await query.message.edit_text(f"{query.message.text}\n\n---\n✅ Принято СБ. Задача поставлена на ЧМ.")
+    await query.answer("Принято. Задача поставлена на ЧМ.")
+
+
+@dp.callback_query(SecurityTaskCB.filter(F.action == "decline"))
+async def handle_security_decline(query: types.CallbackQuery, callback_data: SecurityTaskCB):
+    """СБ отклоняет перенос/отмену. Возвращаем кнопку 'Принять' в чат."""
+    await update_security_task_status(callback_data.deal_id, "declined")
+    
+    deal = await get_deal_by_id(callback_data.deal_id)
+    if not deal:
+        await query.answer("Сделка не найдена!", show_alert=True)
+        return
+        
+    # Восстанавливаем кнопку "Принять"
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Принять", callback_data=DealCB(action="accept", id=str(callback_data.deal_id)).pack())
+    
+    # Отправляем новое сообщение в топик сделки, т.к. старое мы не можем надежно найти и отредактировать
+    await bot.send_message(
+        chat_id=deal['chat_id'],
+        message_thread_id=deal['topic_id'],
+        text=f"🚫 Сотрудник СБ @{query.from_user.username} отклонил перенос/отмену.\n"
+             f"Заявка возвращена в работу. Менеджер, прими заявку.",
+        reply_markup=builder.as_markup()
+    )
+    
+    await query.message.edit_text(f"{query.message.text}\n\n---\n🚫 Отклонено СБ. Заявка возвращена в работу.")
+    await query.answer("Отклонено. Заявка возвращена в работу.")
+
 
 # Новые обработчики для кнопок "Перенести" и "Отклонить"
 @dp.callback_query(TaskCB.filter(F.action.in_({"transfer", "reject"})))

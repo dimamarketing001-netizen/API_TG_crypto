@@ -24,6 +24,12 @@ class DealCB(CallbackData, prefix="deal"):
     action: str
     id: str # ID из таблицы CryptoDeals
 
+
+class SecurityTaskCB(CallbackData, prefix="sec_task"):
+    action: str
+    deal_id: int
+
+
 class BotService:
     @staticmethod
     async def send_task_to_operator(task_id, op_group):
@@ -132,6 +138,15 @@ class BotService:
         """Создает клавиатуру для кнопки 'Клиент пришел'."""
         builder = InlineKeyboardBuilder()
         builder.button(text="Клиент пришел", callback_data=DealCB(action="client_arrived", id=deal_id).pack())
+        return builder.as_markup()
+
+    @staticmethod
+    def get_security_task_keyboard(deal_id: int):
+        """Создает клавиатуру для задачи СБ (Перенос/Отмена)."""
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✅ Принять", callback_data=SecurityTaskCB(action="accept", deal_id=deal_id).pack())
+        builder.button(text="❌ Отклонить", callback_data=SecurityTaskCB(action="decline", deal_id=deal_id).pack())
+        builder.adjust(2)
         return builder.as_markup()
 
     @staticmethod

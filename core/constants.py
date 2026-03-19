@@ -21,6 +21,10 @@ SECURITY_TO_GROUPS = {
     "7618917603": -1003864400045
 }
 
+MANAGERS_TO_GROUPS = {
+    "582035596": -1003884189249,
+}
+
 STATUS_MAP = {
     "calc_new": "🆕 Новый расчет",
     "calc_requested": "📩 Запросили расчет",
