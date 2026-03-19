@@ -2,7 +2,7 @@ import random
 import httpx
 from aiogram import Bot
 from core.config import settings
-from core.constants import CITIES_TO_GROUPS, OPERATORS_TO_GROUPS
+from core.constants import CITIES_TO_GROUPS, OPERATORS_TO_GROUPS, MANAGERS_TO_GROUPS
 from db.repository import get_online_operators, create_task_log, update_operator_thread
 from services.operator_logic import balancer 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -121,31 +121,34 @@ class BotService:
         try:
             if data.creator_id:
                 from db.repository import get_employee_by_id, update_deal_creator_topic
-                from core.constants import EMPLOYEE_WORK_CHAT_ID_COLUMN
                 
                 employee = await get_employee_by_id(data.creator_id)
 
-                if employee and EMPLOYEE_WORK_CHAT_ID_COLUMN in employee and employee[EMPLOYEE_WORK_CHAT_ID_COLUMN]:
-                    work_chat_id = employee[EMPLOYEE_WORK_CHAT_ID_COLUMN]
-                    
-                    creator_topic = await bot.create_forum_topic(chat_id=work_chat_id, name="✅ Заявка создана")
-                    
-                    # Сохраняем ID топика в заявку
-                    await update_deal_creator_topic(deals_id, creator_topic.message_thread_id)
+                if employee and 'personal_telegram_id' in employee:
+                    manager_tg_id = str(employee['personal_telegram_id'])
+                    work_chat_id = MANAGERS_TO_GROUPS.get(manager_tg_id)
 
-                    # Генерируем ссылку на основной топик
-                    chat_id_for_link = str(group_id).replace("-100", "")
-                    topic_link = f"https://t.me/c/{chat_id_for_link}/{topic.message_thread_id}"
-                    
-                    await bot.send_message(
-                        chat_id=work_chat_id,
-                        message_thread_id=creator_topic.message_thread_id,
-                        text=f"Ваша заявка успешно создана.\n\n<a href='{topic_link}'>Перейти к заявке</a>",
-                        parse_mode="HTML",
-                        disable_web_page_preview=True
-                    )
+                    if work_chat_id:
+                        creator_topic = await bot.create_forum_topic(chat_id=work_chat_id, name="✅ Заявка создана")
+                        
+                        # Сохраняем ID топика в заявку
+                        await update_deal_creator_topic(deals_id, creator_topic.message_thread_id)
+
+                        # Генерируем ссылку на основной топик
+                        chat_id_for_link = str(group_id).replace("-100", "")
+                        topic_link = f"https://t.me/c/{chat_id_for_link}/{topic.message_thread_id}"
+                        
+                        await bot.send_message(
+                            chat_id=work_chat_id,
+                            message_thread_id=creator_topic.message_thread_id,
+                            text=f"Ваша заявка успешно создана.\n\n<a href='{topic_link}'>Перейти к заявке</a>",
+                            parse_mode="HTML",
+                            disable_web_page_preview=True
+                        )
+                    else:
+                        log.warning(f"Не удалось найти группу для менеджера с TG ID {manager_tg_id} в MANAGERS_TO_GROUPS.")
                 else:
-                    log.warning(f"Не удалось отправить уведомление создателю {data.creator_id}: 'work_chat_id' не найден.")
+                    log.warning(f"Не удалось отправить уведомление создателю {data.creator_id}: 'personal_telegram_id' не найден у сотрудника.")
             else:
                 log.warning("В данных отсутствует creator_id, уведомление создателю не отправлено.")
         except Exception as e:
