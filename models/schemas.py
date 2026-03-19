@@ -4,7 +4,7 @@ from typing import Optional, Union, Any
 class TransactionData(BaseModel):
     city_id: Union[int, str]
     brand_id: Optional[Union[int, str]] = None
-    creator_id: Optional[Union[int, str]] = None
+    creator_id: Union[int, str]
     visit_time: Optional[str] = ""
     transaction_type: Optional[str] = "direct"
     client_full_name: Optional[str] = "Не указано"
