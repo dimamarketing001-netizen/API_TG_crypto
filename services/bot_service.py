@@ -27,7 +27,7 @@ class DealCB(CallbackData, prefix="deal"):
 
 class SecurityTaskCB(CallbackData, prefix="sec_task"):
     action: str
-    deal_id: int
+    deal_id: str
 
 
 class BotService:
@@ -141,7 +141,7 @@ class BotService:
         return builder.as_markup()
 
     @staticmethod
-    def get_security_task_keyboard(deal_id: int):
+    def get_security_task_keyboard(deal_id: str):
         """Создает клавиатуру для задачи СБ (Перенос/Отмена)."""
         builder = InlineKeyboardBuilder()
         builder.button(text="✅ Принять", callback_data=SecurityTaskCB(action="accept", deal_id=deal_id).pack())

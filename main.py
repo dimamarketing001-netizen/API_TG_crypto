@@ -7,6 +7,7 @@ from typing import Any
 from db.session import db
 from models.schemas import TransactionData, CalculationData, StatusUpdateData
 from aiogram.types import BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from models.schemas import TransactionData, CalculationData, StatusUpdateData, ProfitabilityData, DocumentData
 from fastapi.responses import RedirectResponse
 from datetime import datetime

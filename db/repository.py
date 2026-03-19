@@ -139,7 +139,7 @@ async def find_or_create_security_topic(client_identifier, security_group_id: in
             )
             return topic.message_thread_id
 
-async def create_security_task(original_task_id: int, officer_id: int, topic_id: int, is_deal_task: bool = False) -> int:
+async def create_security_task(original_task_id: str, officer_id: int, topic_id: int, is_deal_task: bool = False) -> int:
     """Создает задачу в таблице security_tasks."""
     async with db.pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -259,7 +259,7 @@ async def get_online_managers():
             await cur.execute(query)
             return await cur.fetchall()
 
-async def update_security_task_status(deal_id: int, status: str):
+async def update_security_task_status(deal_id: str, status: str):
     """Обновляет статус задачи СБ, связанной с deal_id."""
     async with db.pool.acquire() as conn:
         async with conn.cursor() as cur:
