@@ -26,7 +26,7 @@ from db.repository import (
     create_security_task
 )
 import asyncio
-from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS, SECURITY_TO_GROUPS
+from core.constants import STATUS_MAP, OPERATORS_TO_GROUPS, SECURITY_TO_GROUPS, CITIES_TO_GROUPS
 from services.crypto_monitor import CryptoMonitor
 from services.operator_logic import security_balancer
 
