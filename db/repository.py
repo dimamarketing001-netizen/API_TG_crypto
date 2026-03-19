@@ -108,19 +108,29 @@ async def get_active_security_tasks_count(officer_id: int):
             res = await cur.fetchone()
             return res[0] if res else 0
 
-async def find_or_create_security_topic(client_identifier, security_group_id: int, officer_id: int) -> int:
-    """Ищет тему для клиента в чате СБ или создает новую."""
+async def find_or_create_security_topic(client_identifier, security_group_id: int, officer_id: int, task_type: str) -> int:
+    """Ищет тему для клиента в чате СБ, создает новую или переименовывает существующую."""
     async with db.pool.acquire() as conn:
         async with conn.cursor(aiomysql.DictCursor) as cur:
+            from services.bot_service import bot
+            topic_title = f"{task_type} | Клиент: {client_identifier}"
+
             # Ищем существующую тему по идентификатору клиента
             await cur.execute("SELECT topic_id FROM security_topics WHERE client_identifier = %s", (str(client_identifier),))
             existing = await cur.fetchone()
+
             if existing:
-                return existing['topic_id']
+                topic_id = existing['topic_id']
+                try:
+                    # Переименовываем существующую тему
+                    await bot.edit_forum_topic(chat_id=security_group_id, message_thread_id=topic_id, name=topic_title)
+                except Exception as e:
+                    # Логируем ошибку, если не удалось переименовать, но продолжаем работу
+                    print(f"Could not rename topic {topic_id}: {e}")
+                return topic_id
             
             # Если не нашли, создаем новую
-            from services.bot_service import bot
-            topic = await bot.create_forum_topic(chat_id=security_group_id, name=f"Клиент: {client_identifier}")
+            topic = await bot.create_forum_topic(chat_id=security_group_id, name=topic_title)
             
             # Сохраняем в БД
             await cur.execute(

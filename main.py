@@ -234,13 +234,12 @@ async def handle_client_arrived(query: types.CallbackQuery, callback_data: DealC
         await query.answer("Заявка не найдена!", show_alert=True)
         return
 
-    # 1. Находим свободного сотрудника СБ
+    # --- Логика для СБ остается, но пользователь об этом не узнает ---
     security_officer = await security_balancer.get_available_security_officer()
     if not security_officer:
         await query.answer("Все сотрудники СБ заняты, попробуйте позже.", show_alert=True)
         return
 
-    # 2. Находим или создаем тему для клиента в чате СБ
     security_group_id = SECURITY_TO_GROUPS.get(str(security_officer['personal_telegram_id']))
     if not security_group_id:
         await query.answer("Не настроена группа для сотрудника СБ.", show_alert=True)
@@ -251,29 +250,49 @@ async def handle_client_arrived(query: types.CallbackQuery, callback_data: DealC
         await query.answer("Не удалось идентифицировать клиента для создания темы СБ.", show_alert=True)
         return
 
-    topic_id = await find_or_create_security_topic(client_identifier, security_group_id, security_officer['id'])
-
-    # 3. Создаем задачу для СБ
+    task_type = "Клиент пришел"
+    topic_id = await find_or_create_security_topic(client_identifier, security_group_id, security_officer['id'], task_type)
     security_task_id = await create_security_task(deal['deals_id'], security_officer['id'], topic_id, is_deal_task=True)
 
-    # 4. Отправляем уведомление в тему СБ
+    deal_type = "Прямая" if deal.get('direction') == 'direct' else "Обратная"
+    city_name = next((city for city, group_id in CITIES_TO_GROUPS.items() if group_id == deal['chat_id']), "Неизвестно")
+    if deal.get('direction') == 'direct':
+        amount = f"{deal.get('amount_to_give')} {deal.get('currency_to_give')}"
+    else: # reverse
+        amount = f"{deal.get('amount_to_give')} {deal.get('currency_to_give')}"
+
+    chat_id_for_link = str(deal['chat_id']).replace('-100', '')
+    topic_link = f"https://t.me/c/{chat_id_for_link}/{deal['topic_id']}"
+
     sb_message = (f"🚨 <b>Новая задача для СБ #{security_task_id}!</b>\n\n"
+                  f"<b>Тип сделки:</b> {deal_type}\n"
+                  f"<b>Город:</b> {city_name}\n"
                   f"<b>Клиент:</b> {deal.get('client_full_name', 'N/A')}\n"
-                  f"<b>Сообщение:</b> Клиент пришел в офис, начинай работу.")
+                  f"<b>Сумма:</b> {amount}\n\n"
+                  f"<a href='{topic_link}'>Перейти к заявке</a>")
     await bot.send_message(security_group_id, message_thread_id=topic_id, text=sb_message, parse_mode="HTML")
+    # --- Конец логики СБ ---
 
-    await query.message.edit_text(f"{query.message.text}\n\n---\n"
-                                  f"✅ Клиент в офисе. Задача передана в СБ.", parse_mode="HTML")
+    # Отправляем новое сообщение в чат
+    await bot.send_message(
+        chat_id=deal['chat_id'],
+        message_thread_id=deal['topic_id'],
+        text="✅ Клиент в офисе",
+        parse_mode="HTML"
+    )
 
-    await query.answer("Задача отправлена в СБ")
+    # Убираем кнопку "Клиент пришел" с предыдущего сообщения
+    await query.message.edit_reply_markup(reply_markup=None)
+
+    await query.answer("Уведомление о прибытии клиента отправлено.")
 
 
 @dp.callback_query(DealCB.filter(F.action.in_({"transfer", "reject"})))
 async def handle_deal_escalation(query: types.CallbackQuery, callback_data: DealCB):
     """Обрабатывает 'Перенести' и 'Отклонить' на основной заявке."""
+    task_type = "Перенос заявки" if callback_data.action == "transfer" else "Отмена заявки"
     action_text = "перенесена" if callback_data.action == "transfer" else "отклонена"
-    action_verb = "Перенос" if callback_data.action == "transfer" else "Отклонение"
-    
+
     deal = await get_deal_by_id(callback_data.id)
     if not deal:
         await query.answer("Заявка не найдена!", show_alert=True)
@@ -291,23 +310,36 @@ async def handle_deal_escalation(query: types.CallbackQuery, callback_data: Deal
         await query.answer("Не настроена группа для сотрудника СБ.", show_alert=True)
         return
 
-    # В таблице CryptoDeals должен быть client_id, связанный с клиентом.
-    # Если его нет, можно использовать client_full_name или другой уникальный идентификатор.
     client_identifier = deal.get('client_id') or deal.get('client_full_name')
     if not client_identifier:
         await query.answer("Не удалось идентифицировать клиента для создания темы СБ.", show_alert=True)
         return
 
-    topic_id = await find_or_create_security_topic(client_identifier, security_group_id, security_officer['id'])
+    topic_id = await find_or_create_security_topic(client_identifier, security_group_id, security_officer['id'], task_type)
 
     # 3. Создаем задачу для СБ (связываем с deal_id)
     security_task_id = await create_security_task(deal['deals_id'], security_officer['id'], topic_id, is_deal_task=True)
 
     # 4. Отправляем уведомление в тему СБ
-    sb_message = (f"🚨 <b>Новая задача от менеджера #{security_task_id}!</b>\n\n"
-                  f"<b>Действие:</b> {action_verb}\n"
-                  f"<b>Менеджер:</b> @{query.from_user.username}\n"
-                  f"<b>Клиент:</b> {deal.get('client_full_name', 'N/A')}")
+    deal_type = "Прямая" if deal.get('direction') == 'direct' else "Обратная"
+    city_name = next((city for city, group_id in CITIES_TO_GROUPS.items() if group_id == deal['chat_id']), "Неизвестно")
+    if deal.get('direction') == 'direct':
+        amount = f"{deal.get('amount_to_give')} {deal.get('currency_to_give')}"
+    else: # reverse
+        amount = f"{deal.get('amount_to_give')} {deal.get('currency_to_give')}"
+
+    chat_id_for_link = str(deal['chat_id']).replace('-100', '')
+    topic_link = f"https://t.me/c/{chat_id_for_link}/{deal['topic_id']}"
+
+    sb_message = (f"🚨 <b>{task_type}</b>\n"
+                  f"Новая задача от менеджера #{security_task_id}!\n\n"
+                  f"<b>Менеджер:</b> @{query.from_user.username}\n\n"
+                  f"<b>Тип сделки:</b> {deal_type}\n"
+                  f"<b>Город:</b> {city_name}\n"
+                  f"<b>Клиент:</b> {deal.get('client_full_name', 'N/A')}\n"
+                  f"<b>Сумма:</b> {amount}\n\n"
+                  f"<a href='{topic_link}'>Перейти к заявке</a>")
+    
     await bot.send_message(security_group_id, message_thread_id=topic_id, text=sb_message, parse_mode="HTML")
 
     await query.message.edit_text(f"{query.message.text}\n\n---\n"
