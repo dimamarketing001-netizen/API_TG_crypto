@@ -217,12 +217,55 @@ async def handle_deal_accept(query: types.CallbackQuery, callback_data: DealCB):
         chat_id=deal['chat_id'],
         message_thread_id=deal['topic_id'],
         text=msg,
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=BotService.get_client_arrived_keyboard(callback_data.id)
     )
     
     # Убираем кнопки с исходного сообщения
     await query.message.edit_reply_markup(reply_markup=None)
     await query.answer("Заявка принята!")
+
+
+@dp.callback_query(DealCB.filter(F.action == "client_arrived"))
+async def handle_client_arrived(query: types.CallbackQuery, callback_data: DealCB):
+    """Обрабатывает нажатие 'Клиент пришел'."""
+    deal = await get_deal_by_id(callback_data.id)
+    if not deal:
+        await query.answer("Заявка не найдена!", show_alert=True)
+        return
+
+    # 1. Находим свободного сотрудника СБ
+    security_officer = await security_balancer.get_available_security_officer()
+    if not security_officer:
+        await query.answer("Все сотрудники СБ заняты, попробуйте позже.", show_alert=True)
+        return
+
+    # 2. Находим или создаем тему для клиента в чате СБ
+    security_group_id = SECURITY_TO_GROUPS.get(str(security_officer['personal_telegram_id']))
+    if not security_group_id:
+        await query.answer("Не настроена группа для сотрудника СБ.", show_alert=True)
+        return
+
+    client_identifier = deal.get('client_id') or deal.get('client_full_name')
+    if not client_identifier:
+        await query.answer("Не удалось идентифицировать клиента для создания темы СБ.", show_alert=True)
+        return
+
+    topic_id = await find_or_create_security_topic(client_identifier, security_group_id, security_officer['id'])
+
+    # 3. Создаем задачу для СБ
+    security_task_id = await create_security_task(deal['deals_id'], security_officer['id'], topic_id, is_deal_task=True)
+
+    # 4. Отправляем уведомление в тему СБ
+    sb_message = (f"🚨 <b>Новая задача для СБ #{security_task_id}!</b>\n\n"
+                  f"<b>Клиент:</b> {deal.get('client_full_name', 'N/A')}\n"
+                  f"<b>Сообщение:</b> Клиент пришел в офис, начинай работу.")
+    await bot.send_message(security_group_id, message_thread_id=topic_id, text=sb_message, parse_mode="HTML")
+
+    await query.message.edit_text(f"{query.message.text}\n\n---\n"
+                                  f"✅ Клиент в офисе. Задача передана в СБ.", parse_mode="HTML")
+
+    await query.answer("Задача отправлена в СБ")
 
 
 @dp.callback_query(DealCB.filter(F.action.in_({"transfer", "reject"})))
